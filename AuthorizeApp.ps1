@@ -52,10 +52,16 @@ $tokenRequestParams = @{
     client_secret = $clientSecret
     redirect_uri = $redirectUri
     grant_type = "authorization_code"
+    access_type = "offline"
 }
 $tokenResponse = Invoke-RestMethod -Uri "https://oauth2.googleapis.com/token" -Method POST -Body $tokenRequestParams
 $refreshtoken = $tokenResponse.refresh_token
 $idtoken = $tokenResponse.id_token
+
+if ($refreshtoken -eq $null) {
+    Write-Host "Failed to retrieve refresh token."
+    exit
+}
 
 # retrieve user email
 $idTokenParts = $idtoken.Split('.')
@@ -75,5 +81,10 @@ if (Test-Path "Credentials_UsersRefreshTokens.json") {
 } else {
     New-Item "Credentials_UsersRefreshTokens.json" -ItemType File
 }
-$refreshTokens.$email = $refreshtoken
+if ($refreshTokens.PSObject.Properties.Name -notcontains $email) {
+    $refreshTokens | Add-Member -Type NoteProperty -Name $email -Value $refreshtoken
+} else {
+    $refreshTokens.$email = $refreshtoken
+}
 $refreshTokens | ConvertTo-Json | Set-Content "Credentials_UsersRefreshTokens.json"
+Write-Host "Saved refresh token for user $email"
