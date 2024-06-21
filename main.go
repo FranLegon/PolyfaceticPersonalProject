@@ -14,25 +14,22 @@ func main() {
 		fmt.Println("Error getting client credentials:", err)
 		return
 	}
-	RefreshTokensMap, err := getRefreshTokensMap()
+	clientCredentials.AccessTokens = make(map[string]AccessToken)
+	_, err = clientCredentials.GetRefreshTokensMap()
 	if err != nil {
 		fmt.Println("Error getting refresh tokens map:", err)
 		return
 	}
-	ok := false
-	clientCredentials.RefreshToken, ok = RefreshTokensMap["franlegon.backup5@gmail.com"]
-	if !ok {
-		fmt.Println("Refresh token not found in RefreshTokensMap")
-		return
-	}
-	accessToken, err := clientCredentials.GetAccessToken()
-	if err != nil {
-		fmt.Println("Error getting access token:", err)
-		return
-	}
-	fmt.Println("Access token:", accessToken)
-	fmt.Println("Access token value:", accessToken.AccessToken)
-	fmt.Println("Expires in:", accessToken.ExpiresIn)
+	/*
+		accessToken, err := clientCredentials.GetAccessToken("franlegon.backup5@gmail.com")
+		if err != nil {
+			fmt.Println("Error getting access token:", err)
+			return
+		}
+		fmt.Println("Access token:", accessToken)
+		fmt.Println("Access token value:", accessToken.AccessToken)
+		fmt.Println("Expires in:", accessToken.ExpiresIn)
+	*/
 }
 
 type WebOAuthClientJson struct {
@@ -42,8 +39,10 @@ type clientCredentials struct {
 	ClientID     string `json:"client_id"`
 	ClientSecret string `json:"client_secret"`
 	TokenUri     string `json:"token_uri"`
-	RefreshToken string
-	AccessToken  AccessToken
+	//RefreshToken string
+	//AccessToken  AccessToken
+	RefreshTokens map[string]string
+	AccessTokens  map[string]AccessToken
 }
 
 type AccessToken struct {
@@ -69,16 +68,16 @@ func GetClientCredentialsFromOAuthJson() (clientCredentials, error) {
 	return webOAuthClientJson.Web, nil
 }
 
-func (c *clientCredentials) GetAccessToken() (AccessToken, error) {
-	if c.AccessToken.AccessToken != "" {
-		return c.AccessToken, nil
+func (c *clientCredentials) GetAccessToken(user string) (AccessToken, error) {
+	if c.AccessTokens[user].AccessToken != "" {
+		return c.AccessTokens[user], nil
 	}
-	if c.RefreshToken == "" {
-		return c.AccessToken, fmt.Errorf("refreshToken is empty")
+	if c.RefreshTokens[user] == "" {
+		return c.AccessTokens[user], fmt.Errorf("refreshToken is empty for user %s", user)
 	}
 
 	data := map[string]string{
-		"refresh_token": c.RefreshToken,
+		"refresh_token": c.RefreshTokens[user],
 		"client_id":     c.ClientID,
 		"client_secret": c.ClientSecret,
 		"grant_type":    "refresh_token",
@@ -87,18 +86,18 @@ func (c *clientCredentials) GetAccessToken() (AccessToken, error) {
 
 	resp, err := http.Post(c.TokenUri, "application/json", bytes.NewBuffer(jsonData))
 	if err != nil {
-		return c.AccessToken, err
+		return c.AccessTokens[user], err
 	}
 
 	var tokenResp AccessToken
 	json.NewDecoder(resp.Body).Decode(&tokenResp)
 
-	c.AccessToken = tokenResp
+	c.AccessTokens[user] = tokenResp
 
-	return c.AccessToken, nil
+	return c.AccessTokens[user], nil
 }
 
-func getRefreshTokensMap() (map[string]string, error) {
+func (c *clientCredentials) GetRefreshTokensMap() (map[string]string, error) {
 	file, err := os.Open("Credentials_UsersRefreshTokens.json")
 	if err != nil {
 		return nil, err
@@ -110,5 +109,7 @@ func getRefreshTokensMap() (map[string]string, error) {
 		return nil, err
 	}
 
-	return refreshTokensMap, nil
+	c.RefreshTokens = refreshTokensMap
+
+	return c.RefreshTokens, nil
 }
