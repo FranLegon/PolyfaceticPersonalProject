@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 )
 
 func main() {
@@ -22,14 +23,9 @@ func main() {
 		fmt.Println("Error getting client credentials:", err)
 		return
 	}
-	clientCredentials.AccessTokens = make(map[string]AccessToken)
-	_, err = clientCredentials.GetRefreshTokensMap()
-	if err != nil {
-		fmt.Println("Error getting refresh tokens map:", err)
-		return
-	}
 
 	////
+	fmt.Println("Client ID:", clientCredentials.ClientID)
 	/*
 		accessToken, err := clientCredentials.GetAccessToken("franlegon.backup5@gmail.com")
 		if err != nil {
@@ -113,22 +109,31 @@ func decryptFile(filename string) error {
 	return nil
 }
 
+type AccessToken struct {
+	AccessToken string `json:"access_token"`
+	Duration    int    `json:"expires_in"`
+	RetrievedAt time.Time
+}
+
+func (t *AccessToken) ExpirationTime() time.Time {
+	return t.RetrievedAt.Add(time.Duration(t.Duration) * time.Second)
+}
+func (t *AccessToken) IsExpired() bool {
+	return time.Now().After(t.ExpirationTime())
+}
+func (t *AccessToken) ExpiresIn() time.Duration {
+	return time.Until(t.ExpirationTime())
+}
+
 type WebOAuthClientJson struct {
 	Web clientCredentials `json:"web"`
 }
 type clientCredentials struct {
-	ClientID     string `json:"client_id"`
-	ClientSecret string `json:"client_secret"`
-	TokenUri     string `json:"token_uri"`
-	//RefreshToken string
-	//AccessToken  AccessToken
+	ClientID      string `json:"client_id"`
+	ClientSecret  string `json:"client_secret"`
+	TokenUri      string `json:"token_uri"`
 	RefreshTokens map[string]string
 	AccessTokens  map[string]AccessToken
-}
-
-type AccessToken struct {
-	AccessToken string `json:"access_token"`
-	ExpiresIn   int    `json:"expires_in"`
 }
 
 func GetClientCredentialsFromOAuthJson() (clientCredentials, error) {
@@ -144,6 +149,13 @@ func GetClientCredentialsFromOAuthJson() (clientCredentials, error) {
 	if err := json.NewDecoder(file).Decode(&webOAuthClientJson); err != nil {
 		fmt.Println("Error decoding JSON:", err)
 		return c, err
+	}
+
+	webOAuthClientJson.Web.AccessTokens = make(map[string]AccessToken)
+	_, err = webOAuthClientJson.Web.GetRefreshTokensMap()
+	if err != nil {
+		fmt.Println("Error getting refresh tokens map:", err)
+		return webOAuthClientJson.Web, err
 	}
 
 	return webOAuthClientJson.Web, nil
@@ -173,6 +185,7 @@ func (c *clientCredentials) GetAccessToken(user string) (AccessToken, error) {
 	var tokenResp AccessToken
 	json.NewDecoder(resp.Body).Decode(&tokenResp)
 
+	tokenResp.RetrievedAt = time.Now()
 	c.AccessTokens[user] = tokenResp
 
 	return c.AccessTokens[user], nil
