@@ -2,13 +2,21 @@ package main
 
 import (
 	"bytes"
+	"crypto/aes"
+	"crypto/cipher"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 )
 
 func main() {
+	decryptFile("Credentials_OAuthClient.json.enc")
+	defer os.Remove("Credentials_OAuthClient.json")
+	decryptFile("Credentials_UsersRefreshTokens.json.enc")
+	defer os.Remove("Credentials_UsersRefreshTokens.json")
 	clientCredentials, err := GetClientCredentialsFromOAuthJson()
 	if err != nil {
 		fmt.Println("Error getting client credentials:", err)
@@ -20,16 +28,89 @@ func main() {
 		fmt.Println("Error getting refresh tokens map:", err)
 		return
 	}
+
+	////
 	/*
 		accessToken, err := clientCredentials.GetAccessToken("franlegon.backup5@gmail.com")
 		if err != nil {
 			fmt.Println("Error getting access token:", err)
 			return
 		}
-		fmt.Println("Access token:", accessToken)
 		fmt.Println("Access token value:", accessToken.AccessToken)
 		fmt.Println("Expires in:", accessToken.ExpiresIn)
 	*/
+
+}
+
+type EncryptionKey struct {
+	KeyBase64 string `json:"keyBase64"`
+	IvBase64  string `json:"ivBase64"`
+}
+
+func decryptFile(filename string) error {
+	// Read the encryption key JSON file
+	keyData, err := os.ReadFile("Credentials_EncriptionKey.json")
+	if err != nil {
+		return err
+	}
+
+	// Unmarshal the JSON data into the EncryptionKey struct
+	var encKey EncryptionKey
+	err = json.Unmarshal(keyData, &encKey)
+	if err != nil {
+		return err
+	}
+
+	// Decode the base64 encoded key and IV
+	key, err := base64.StdEncoding.DecodeString(encKey.KeyBase64)
+	if err != nil {
+		return err
+	}
+	iv, err := base64.StdEncoding.DecodeString(encKey.IvBase64)
+	if err != nil {
+		return err
+	}
+
+	// Decryption process
+	ciphertext, err := os.ReadFile(filename)
+	if err != nil {
+		return err
+	}
+
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return err
+	}
+
+	if len(ciphertext) < aes.BlockSize {
+		return fmt.Errorf("ciphertext too short")
+	}
+
+	mode := cipher.NewCBCDecrypter(block, iv)
+	mode.CryptBlocks(ciphertext, ciphertext)
+
+	// remove padding
+	padding := ciphertext[len(ciphertext)-1] // Get the last byte, which indicates padding length
+	padLen := int(padding)                   // Convert to int for slicing
+
+	if padLen > aes.BlockSize || padLen == 0 {
+		return fmt.Errorf("invalid padding")
+	}
+	for _, padByte := range ciphertext[len(ciphertext)-padLen:] {
+		if padByte != padding {
+			return fmt.Errorf("invalid padding byte")
+		}
+	}
+	ciphertext = ciphertext[:len(ciphertext)-padLen]
+
+	// Write the decrypted file
+	decryptedFilename := strings.TrimSuffix(filename, ".enc")
+	err = os.WriteFile(decryptedFilename, ciphertext, 0644)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 type WebOAuthClientJson struct {

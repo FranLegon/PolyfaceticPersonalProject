@@ -88,3 +88,35 @@ if ($refreshTokens.PSObject.Properties.Name -notcontains $email) {
 }
 $refreshTokens | ConvertTo-Json | Set-Content "Credentials_UsersRefreshTokens.json"
 Write-Host "Saved refresh token for user $email"
+
+# Encription
+<# Generate keys
+$key = New-Object Byte[] 32 # AES-256 requires a 32-byte key
+$iv = New-Object Byte[] 16 # For AES, IV size is 16 bytes for AES-128, AES-192, and AES-256
+[Security.Cryptography.RNGCryptoServiceProvider]::Create().GetBytes($key)
+[Security.Cryptography.RNGCryptoServiceProvider]::Create().GetBytes($iv)
+# encode the key and iv as base64 strings
+$keyBase64 = [Convert]::ToBase64String($key)
+$ivBase64 = [Convert]::ToBase64String($iv)
+#>
+
+
+# Read the JSON file and convert its content to a PowerShell object
+$jsonContent = Get-Content -Path "Credentials_EncriptionKey.json" -Raw | ConvertFrom-Json
+$keyBase64 = $jsonContent.keyBase64
+$ivBase64 = $jsonContent.ivBase64
+$key = [Convert]::FromBase64String($keyBase64)
+$iv = [Convert]::FromBase64String($ivBase64)
+
+$file = "Credentials_UsersRefreshTokens.json"
+$content = Get-Content -Path $file -Raw
+$encryptor = [System.Security.Cryptography.Aes]::Create()
+$encryptor.Key = $key
+$encryptor.IV = $iv
+$ms = New-Object IO.MemoryStream
+$cs = New-Object Security.Cryptography.CryptoStream $ms, $encryptor.CreateEncryptor(), ([System.Security.Cryptography.CryptoStreamMode]::Write)
+$sw = New-Object IO.StreamWriter $cs
+$sw.Write($content)
+$sw.Close()
+$encrypted = $ms.ToArray()
+[System.IO.File]::WriteAllBytes(($file +".enc"), $encrypted)
