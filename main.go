@@ -26,15 +26,28 @@ func main() {
 
 	////
 	fmt.Println("Client ID:", clientCredentials.ClientID)
-	/*
-		accessToken, err := clientCredentials.GetAccessToken("franlegon.backup5@gmail.com")
-		if err != nil {
-			fmt.Println("Error getting access token:", err)
-			return
-		}
-		fmt.Println("Access token value:", accessToken.AccessToken)
-		fmt.Println("Expires in:", accessToken.ExpiresIn)
-	*/
+
+	accessToken, err := clientCredentials.GetAccessToken("franlegon.backup5@gmail.com")
+	if err != nil {
+		fmt.Println("Error getting access token:", err)
+		return
+	}
+
+	files, err := listFiles(accessToken.AccessToken)
+	if err != nil {
+		fmt.Println("Error listing files:", err)
+		return
+	}
+	fmt.Println("Files:")
+	for _, f := range files.Files {
+		fmt.Println(f.Name)
+	}
+	fmt.Println("Access token expires in:", accessToken.ExpiresIn())
+	fmt.Println("Access token is expired:", accessToken.IsExpired())
+	fmt.Println("Access token expiration time:", accessToken.ExpirationTime())
+	fmt.Println("Access token duration:", accessToken.Duration)
+	fmt.Println("Access token retrieved at:", accessToken.RetrievedAt)
+	fmt.Println("Access token:", accessToken.AccessToken)
 
 }
 
@@ -206,4 +219,57 @@ func (c *clientCredentials) GetRefreshTokensMap() (map[string]string, error) {
 	c.RefreshTokens = refreshTokensMap
 
 	return c.RefreshTokens, nil
+}
+
+type files struct {
+	Files         []file `json:"files"`
+	NextPageToken string `json:"nextPageToken,omitempty"`
+}
+type file struct {
+	Name     string `json:"name"`
+	Id       string `json:"id"`
+	Kind     string `json:"kind"`
+	MimeType string `json:"mimeType"`
+}
+
+func listFiles(accessToken string) (files, error) {
+	var allFiles files
+	url := "https://www.googleapis.com/drive/v3/files"
+	for {
+		req, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			return allFiles, err
+		}
+		req.Header.Set("Authorization", "Bearer "+accessToken)
+
+		// Add query parameters if nextPageToken exists
+		q := req.URL.Query()
+		if allFiles.NextPageToken != "" {
+			q.Add("pageToken", allFiles.NextPageToken)
+		}
+		req.URL.RawQuery = q.Encode()
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return allFiles, err
+		}
+		defer resp.Body.Close()
+
+		var pageFiles files
+		if err := json.NewDecoder(resp.Body).Decode(&pageFiles); err != nil {
+			return allFiles, err
+		}
+
+		// Append the files from the current page to the allFiles
+		allFiles.Files = append(allFiles.Files, pageFiles.Files...)
+
+		// Break the loop if there is no nextPageToken
+		if pageFiles.NextPageToken == "" {
+			break
+		} else {
+			allFiles.NextPageToken = pageFiles.NextPageToken
+		}
+	}
+
+	return allFiles, nil
 }
