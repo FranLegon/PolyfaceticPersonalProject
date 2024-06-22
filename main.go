@@ -40,14 +40,9 @@ func main() {
 	}
 	fmt.Println("Files:")
 	for _, f := range files.Files {
-		fmt.Println(f.Name)
+		fmt.Println(f)
+
 	}
-	fmt.Println("Access token expires in:", accessToken.ExpiresIn())
-	fmt.Println("Access token is expired:", accessToken.IsExpired())
-	fmt.Println("Access token expiration time:", accessToken.ExpirationTime())
-	fmt.Println("Access token duration:", accessToken.Duration)
-	fmt.Println("Access token retrieved at:", accessToken.RetrievedAt)
-	fmt.Println("Access token:", accessToken.AccessToken)
 
 }
 
@@ -230,11 +225,16 @@ type file struct {
 	Id       string `json:"id"`
 	Kind     string `json:"kind"`
 	MimeType string `json:"mimeType"`
+	Size     string `json:"size"`
+	Owners   []struct {
+		DisplayName  string `json:"displayName"`
+		EmailAddress string `json:"emailAddress"`
+	} `json:"owners"`
 }
 
 func listFiles(accessToken string) (files, error) {
 	var allFiles files
-	url := "https://www.googleapis.com/drive/v3/files"
+	url := "https://www.googleapis.com/drive/v3/files" + "?fields=nextPageToken,files(id,name,kind,mimeType,owners,size)"
 	for {
 		req, err := http.NewRequest("GET", url, nil)
 		if err != nil {
