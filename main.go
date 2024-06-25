@@ -316,6 +316,7 @@ type StorageQuota struct {
 	UsageInDrive      int64
 	Usage             int64
 	UsageInDriveTrash int64
+	Free              int64
 }
 
 func getStorageQuota(accessToken string) (StorageQuota, error) {
@@ -363,11 +364,12 @@ func getStorageQuota(accessToken string) (StorageQuota, error) {
 	if err != nil {
 		return quota, err
 	}
+	quota.Free = quota.Limit - quota.Usage
 
 	return quota, nil
 }
 
 func (quota StorageQuota) SeeInGigaBytes() string {
-	return fmt.Sprintf("Limit: %.2f GB, UsageInDrive: %.2f GB, Usage: %.2f GB, UsageInDriveTrash: %.2f GB",
-		float64(quota.Limit)/(1<<30), float64(quota.UsageInDrive)/(1<<30), float64(quota.Usage)/(1<<30), float64(quota.UsageInDriveTrash)/(1<<30))
+	return fmt.Sprintf("Limit: %.2f GB, UsageInDrive: %.2f GB, Usage: %.2f GB, UsageInDriveTrash: %.2f GB, Free: %.2f GB",
+		float64(quota.Limit)/(1<<30), float64(quota.UsageInDrive)/(1<<30), float64(quota.Usage)/(1<<30), float64(quota.UsageInDriveTrash)/(1<<30), float64(quota.Free)/(1<<30))
 }
