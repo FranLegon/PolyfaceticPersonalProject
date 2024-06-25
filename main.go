@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -27,22 +28,31 @@ func main() {
 	////
 	fmt.Println("Client ID:", clientCredentials.ClientID)
 
-	accessToken, err := clientCredentials.GetAccessToken("franlegon.backup5@gmail.com")
+	accessToken, err := clientCredentials.GetAccessToken("franlegon.backup1@gmail.com")
 	if err != nil {
 		fmt.Println("Error getting access token:", err)
 		return
 	}
 
-	files, err := listFiles(accessToken.AccessToken)
+	//files, err := listFiles(accessToken.AccessToken)
+	//if err != nil {
+	//	fmt.Println("Error listing files:", err)
+	//	return
+	//}
+	//fmt.Println("Files:")
+	//for _, f := range files.Files {
+	//	fmt.Println(f)
+	//}
+	fmt.Println("--------------------------------------------------------------------")
+	quota, err := getStorageQuota(accessToken.AccessToken)
 	if err != nil {
-		fmt.Println("Error listing files:", err)
+		fmt.Println("Error getting quota:", err)
 		return
 	}
-	fmt.Println("Files:")
-	for _, f := range files.Files {
-		fmt.Println(f)
-
-	}
+	fmt.Println("Quota:/n", quota)
+	fmt.Println("--------------------------------------------------------------------")
+	fmt.Println("Quota in GigaBytes:/n", quota.SeeInGigaBytes())
+	fmt.Println("--------------------------------------------------------------------")
 
 }
 
@@ -272,4 +282,92 @@ func listFiles(accessToken string) (files, error) {
 	}
 
 	return allFiles, nil
+}
+
+func transferOwnership(fileID string, accessToken string, newOwnerEmail string) error {
+	url := "https://www.googleapis.com/drive/v3/files/" + fileID + "/permissions"
+	req, err := http.NewRequest("POST", url, strings.NewReader(`{
+		"role": "owner",
+		"type": "user",
+		"emailAddress": "`+newOwnerEmail+`",
+		"transferOwnership": true
+	}`))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		return fmt.Errorf("transfer ownership failed: %s", resp.Status)
+	}
+
+	return nil
+}
+
+type StorageQuota struct {
+	Limit             int64
+	UsageInDrive      int64
+	Usage             int64
+	UsageInDriveTrash int64
+}
+
+func getStorageQuota(accessToken string) (StorageQuota, error) {
+	var quota StorageQuota
+	url := "https://www.googleapis.com/drive/v3/about?fields=storageQuota"
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return quota, err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return quota, err
+	}
+	defer resp.Body.Close()
+	//////VMT
+	//bodyBytes, _ := io.ReadAll(resp.Body)
+	//fmt.Println(string(bodyBytes))
+	//////VMT
+	var quotaAsStrings struct {
+		StorageQuota struct {
+			Limit             string `json:"limit"`
+			UsageInDrive      string `json:"usageInDrive"`
+			Usage             string `json:"usage"`
+			UsageInDriveTrash string `json:"usageInDriveTrash"`
+		} `json:"storageQuota"`
+	}
+	err = json.NewDecoder(resp.Body).Decode(&quotaAsStrings)
+	if err != nil {
+		return quota, err
+	}
+	quota.Limit, err = strconv.ParseInt(quotaAsStrings.StorageQuota.Limit, 10, 64)
+	if err != nil {
+		return quota, err
+	}
+	quota.UsageInDrive, err = strconv.ParseInt(quotaAsStrings.StorageQuota.UsageInDrive, 10, 64)
+	if err != nil {
+		return quota, err
+	}
+	quota.Usage, err = strconv.ParseInt(quotaAsStrings.StorageQuota.Usage, 10, 64)
+	if err != nil {
+		return quota, err
+	}
+	quota.UsageInDriveTrash, err = strconv.ParseInt(quotaAsStrings.StorageQuota.UsageInDriveTrash, 10, 64)
+	if err != nil {
+		return quota, err
+	}
+
+	return quota, nil
+}
+
+func (quota StorageQuota) SeeInGigaBytes() string {
+	return fmt.Sprintf("Limit: %.2f GB, UsageInDrive: %.2f GB, Usage: %.2f GB, UsageInDriveTrash: %.2f GB",
+		float64(quota.Limit)/(1<<30), float64(quota.UsageInDrive)/(1<<30), float64(quota.Usage)/(1<<30), float64(quota.UsageInDriveTrash)/(1<<30))
 }
