@@ -2,39 +2,51 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"golang.ngrok.com/ngrok"
+	"golang.ngrok.com/ngrok/config"
 )
 
+// #region main
+
 func main() {
-	decryptFile("Credentials_OAuthClient.json.enc")
+	NgrokHandler()
+}
+
+func main2() {
+	DecryptFile("Credentials_OAuthClient.json.enc")
 	defer os.Remove("Credentials_OAuthClient.json")
-	decryptFile("Credentials_UsersRefreshTokens.json.enc")
+	DecryptFile("Credentials_UsersRefreshTokens.json.enc")
 	defer os.Remove("Credentials_UsersRefreshTokens.json")
-	clientCredentials, err := GetClientCredentialsFromOAuthJson()
+	ClientCredentials, err := GetClientCredentialsFromOAuthJson()
 	if err != nil {
 		fmt.Println("Error getting client credentials:", err)
 		return
 	}
 
 	////
-	fmt.Println("Client ID:", clientCredentials.ClientID)
+	fmt.Println("Client ID:", ClientCredentials.ClientID)
 
-	accessToken, err := clientCredentials.GetAccessToken("franlegon.backup1@gmail.com")
+	accessToken, err := ClientCredentials.GetAccessToken("franlegon.backup1@gmail.com")
 	if err != nil {
 		fmt.Println("Error getting access token:", err)
 		return
 	}
 
-	//files, err := listFiles(accessToken.AccessToken)
+	//files, err := ListFiles(accessToken.AccessToken)
 	//if err != nil {
 	//	fmt.Println("Error listing files:", err)
 	//	return
@@ -44,7 +56,7 @@ func main() {
 	//	fmt.Println(f)
 	//}
 	fmt.Println("--------------------------------------------------------------------")
-	quota, err := getStorageQuota(accessToken.AccessToken)
+	quota, err := GetStorageQuota(accessToken.AccessToken)
 	if err != nil {
 		fmt.Println("Error getting quota:", err)
 		return
@@ -53,15 +65,30 @@ func main() {
 	fmt.Println("--------------------------------------------------------------------")
 	fmt.Println("Quota in GigaBytes:/n", quota.SeeInGigaBytes())
 	fmt.Println("--------------------------------------------------------------------")
-
 }
 
+func main3() {
+	WhatsappCredentials, err := GetWhatsappCredentials()
+	if err != nil {
+		fmt.Println("Error getting whatsapp credentials:", err)
+		return
+	}
+	err = SendWhatsappMessage(WhatsappCredentials.AccessToken, "Hello from Go!", WhatsappCredentials.To)
+	if err != nil {
+		fmt.Println("Error sending message:", err)
+		return
+	}
+}
+
+// #endregion main
+
+// #region Google
 type EncryptionKey struct {
 	KeyBase64 string `json:"keyBase64"`
 	IvBase64  string `json:"ivBase64"`
 }
 
-func decryptFile(filename string) error {
+func DecryptFile(filename string) error {
 	// Read the encryption key JSON file
 	keyData, err := os.ReadFile("Credentials_EncriptionKey.json")
 	if err != nil {
@@ -144,9 +171,9 @@ func (t *AccessToken) ExpiresIn() time.Duration {
 }
 
 type WebOAuthClientJson struct {
-	Web clientCredentials `json:"web"`
+	Web ClientCredentials `json:"web"`
 }
-type clientCredentials struct {
+type ClientCredentials struct {
 	ClientID      string `json:"client_id"`
 	ClientSecret  string `json:"client_secret"`
 	TokenUri      string `json:"token_uri"`
@@ -154,8 +181,8 @@ type clientCredentials struct {
 	AccessTokens  map[string]AccessToken
 }
 
-func GetClientCredentialsFromOAuthJson() (clientCredentials, error) {
-	var c clientCredentials
+func GetClientCredentialsFromOAuthJson() (ClientCredentials, error) {
+	var c ClientCredentials
 	file, err := os.Open("Credentials_OAuthClient.json")
 	if err != nil {
 		fmt.Println("Error opening file:", err)
@@ -179,7 +206,7 @@ func GetClientCredentialsFromOAuthJson() (clientCredentials, error) {
 	return webOAuthClientJson.Web, nil
 }
 
-func (c *clientCredentials) GetAccessToken(user string) (AccessToken, error) {
+func (c *ClientCredentials) GetAccessToken(user string) (AccessToken, error) {
 	if c.AccessTokens[user].AccessToken != "" {
 		return c.AccessTokens[user], nil
 	}
@@ -209,7 +236,7 @@ func (c *clientCredentials) GetAccessToken(user string) (AccessToken, error) {
 	return c.AccessTokens[user], nil
 }
 
-func (c *clientCredentials) GetRefreshTokensMap() (map[string]string, error) {
+func (c *ClientCredentials) GetRefreshTokensMap() (map[string]string, error) {
 	file, err := os.Open("Credentials_UsersRefreshTokens.json")
 	if err != nil {
 		return nil, err
@@ -226,11 +253,11 @@ func (c *clientCredentials) GetRefreshTokensMap() (map[string]string, error) {
 	return c.RefreshTokens, nil
 }
 
-type files struct {
-	Files         []file `json:"files"`
+type Files struct {
+	Files         []File `json:"files"`
 	NextPageToken string `json:"nextPageToken,omitempty"`
 }
-type file struct {
+type File struct {
 	Name     string `json:"name"`
 	Id       string `json:"id"`
 	Kind     string `json:"kind"`
@@ -242,8 +269,8 @@ type file struct {
 	} `json:"owners"`
 }
 
-func listFiles(accessToken string) (files, error) {
-	var allFiles files
+func ListFiles(accessToken string) (Files, error) {
+	var allFiles Files
 	url := "https://www.googleapis.com/drive/v3/files" + "?fields=nextPageToken,files(id,name,kind,mimeType,owners,size)"
 	for {
 		req, err := http.NewRequest("GET", url, nil)
@@ -265,7 +292,7 @@ func listFiles(accessToken string) (files, error) {
 		}
 		defer resp.Body.Close()
 
-		var pageFiles files
+		var pageFiles Files
 		if err := json.NewDecoder(resp.Body).Decode(&pageFiles); err != nil {
 			return allFiles, err
 		}
@@ -284,13 +311,13 @@ func listFiles(accessToken string) (files, error) {
 	return allFiles, nil
 }
 
-func transferOwnership(fileID string, accessToken string, newOwnerEmail string) error {
+func TransferOwnership(fileID string, accessToken string, newOwnerEmail string) error {
 	url := "https://www.googleapis.com/drive/v3/files/" + fileID + "/permissions"
 	req, err := http.NewRequest("POST", url, strings.NewReader(`{
 		"role": "owner",
 		"type": "user",
 		"emailAddress": "`+newOwnerEmail+`",
-		"transferOwnership": true
+		"TransferOwnership": true
 	}`))
 	if err != nil {
 		return err
@@ -319,7 +346,7 @@ type StorageQuota struct {
 	Free              int64
 }
 
-func getStorageQuota(accessToken string) (StorageQuota, error) {
+func GetStorageQuota(accessToken string) (StorageQuota, error) {
 	var quota StorageQuota
 	url := "https://www.googleapis.com/drive/v3/about?fields=storageQuota"
 	req, err := http.NewRequest("GET", url, nil)
@@ -373,3 +400,150 @@ func (quota StorageQuota) SeeInGigaBytes() string {
 	return fmt.Sprintf("Limit: %.2f GB, UsageInDrive: %.2f GB, Usage: %.2f GB, UsageInDriveTrash: %.2f GB, Free: %.2f GB",
 		float64(quota.Limit)/(1<<30), float64(quota.UsageInDrive)/(1<<30), float64(quota.Usage)/(1<<30), float64(quota.UsageInDriveTrash)/(1<<30), float64(quota.Free)/(1<<30))
 }
+
+// #endregion Google
+
+// #region Whatsapp
+type WhatsappCredentials struct {
+	AccessToken string `json:"admin-system-user-access-token"`
+	To          int    `json:"to-whatsapp-number"`
+}
+
+func GetWhatsappCredentials() (WhatsappCredentials, error) {
+	var WhatsappCredentials WhatsappCredentials
+	file, err := os.Open("Credentials_Whatsapp.json")
+	if err != nil {
+		fmt.Println("Error opening file:", err)
+		return WhatsappCredentials, err
+	}
+	defer file.Close()
+
+	if err := json.NewDecoder(file).Decode(&WhatsappCredentials); err != nil {
+		fmt.Println("Error decoding JSON:", err)
+		return WhatsappCredentials, err
+	}
+
+	return WhatsappCredentials, nil
+}
+
+func SendWhatsappMessage(accessToken string, message string, to int) error {
+	url := "https://graph.facebook.com/v19.0/387981631054756/messages"
+	body := fmt.Sprintf(`{
+		"messaging_product": "whatsapp",
+		"to": "%d",
+		"type": "text",
+		"text": {
+			"preview_url": false,
+			"body": "%s"
+		}
+	}`, to, message)
+
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer([]byte(body)))
+	if err != nil {
+		return err
+	}
+
+	req.Header.Add("Authorization", "Bearer "+accessToken)
+	req.Header.Add("Content-Type", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("failed to read response body: %v", err)
+		}
+		bodyMessage := string(bodyBytes)
+		return fmt.Errorf("failed to send WhatsApp message, status code: %d, message: %s", resp.StatusCode, bodyMessage)
+	}
+
+	return nil
+}
+
+// #endregion Whatsapp
+
+// #region ngrok
+type NgrokCredentials struct {
+	AuthToken      string `json:"authToken"`
+	WithForwardsTo string `json:"withForwardsTo"`
+	WithDomain     string `json:"withDomain"`
+}
+
+func GetNgrokCredentials() (NgrokCredentials, error) {
+	var c NgrokCredentials
+	file, err := os.Open("Credentials_Ngrok.json")
+	if err != nil {
+		fmt.Println("Error opening file:", err)
+		return c, err
+	}
+	defer file.Close()
+
+	if err := json.NewDecoder(file).Decode(&c); err != nil {
+		fmt.Println("Error decoding JSON:", err)
+		return c, err
+	}
+
+	return c, nil
+}
+
+func NgrokHandler() {
+	ngrokCredentials, err := GetNgrokCredentials()
+	if err != nil {
+		fmt.Println("Error getting ngrok credentials:", err)
+		return
+	}
+	ngrokAuth := ngrok.WithAuthtoken(ngrokCredentials.AuthToken)
+	tunnel := config.HTTPEndpoint(
+		config.WithForwardsTo(ngrokCredentials.WithForwardsTo),
+		config.WithDomain(ngrokCredentials.WithDomain),
+		config.WithScheme(config.SchemeHTTPS),
+		/*
+			config.WithAllowCIDRString("0.0.0.0/0"),
+			config.WithAllowUserAgent("Mozilla/5.0.*"),
+			// config.WithBasicAuth("ngrok", "online1line"),
+			config.WithCircuitBreaker(0.5),
+			config.WithCompression(),
+			config.WithDenyCIDRString("10.1.1.1/32"),
+			config.WithDenyUserAgent("EvilCorp.*"),
+			// config.WithDomain("<somedomain>.ngrok.io"),
+			config.WithMetadata("example secure connection metadata from golang"),
+			// config.WithMutualTLSCA(<cert>),
+			// config.WithOAuth("google",
+			// 	config.WithAllowOAuthEmail("<user>@<domain>"),
+			// 	config.WithAllowOAuthDomain("<domain>"),
+			// 	config.WithOAuthScope("<scope>"),
+			// ),
+			// config.WithOIDC("<url>", "<id>", "<secret>",
+			// 	config.WithAllowOIDCEmail("<user>@<domain>"),
+			// 	config.WithAllowOIDCDomain("<domain>"),
+			// 	config.WithOIDCScope("<scope>"),
+			// ),
+			config.WithProxyProto(config.ProxyProtoNone),
+			config.WithRemoveRequestHeader("X-Req-Nope"),
+			config.WithRemoveResponseHeader("X-Res-Nope"),
+			config.WithRequestHeader("X-Req-Yup", "true"),
+			config.WithResponseHeader("X-Res-Yup", "true"),
+			config.WithScheme(config.SchemeHTTPS),
+			// config.WithWebsocketTCPConversion(),
+			// config.WithWebhookVerification("twilio", "asdf"),
+		*/
+	)
+	ln, err := ngrok.Listen(context.Background(), tunnel, ngrokAuth)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Println("Ingress established at:", ln.URL())
+	http.HandleFunc("/", Handler)
+	log.Fatal(http.Serve(ln, nil))
+}
+
+func Handler(w http.ResponseWriter, r *http.Request) {
+	w.Write([]byte("Hello from ngrok-go!"))
+}
+
+// #endregion ngrok
