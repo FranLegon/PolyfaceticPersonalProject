@@ -100,8 +100,6 @@ $keyBase64 = [Convert]::ToBase64String($key)
 $ivBase64 = [Convert]::ToBase64String($iv)
 #>
 
-
-# Read the JSON file and convert its content to a PowerShell object
 $jsonContent = Get-Content -Path "Credentials_EncriptionKey.json" -Raw | ConvertFrom-Json
 $keyBase64 = $jsonContent.keyBase64
 $ivBase64 = $jsonContent.ivBase64

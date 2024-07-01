@@ -23,14 +23,20 @@ import (
 // #region main
 
 func main() {
-	NgrokHandler()
+	WhatsappCredentials, err := GetWhatsappCredentials()
+	if err != nil {
+		fmt.Println("Error getting whatsapp credentials:", err)
+		return
+	}
+	err = SendWhatsappMessage(WhatsappCredentials.AccessToken, "Hello from Go!", WhatsappCredentials.To)
+	if err != nil {
+		fmt.Println("Error sending message:", err)
+		return
+	}
 }
 
 func main2() {
-	DecryptFile("Credentials_OAuthClient.json.enc")
-	defer os.Remove("Credentials_OAuthClient.json")
-	DecryptFile("Credentials_UsersRefreshTokens.json.enc")
-	defer os.Remove("Credentials_UsersRefreshTokens.json")
+
 	ClientCredentials, err := GetClientCredentialsFromOAuthJson()
 	if err != nil {
 		fmt.Println("Error getting client credentials:", err)
@@ -182,6 +188,12 @@ type ClientCredentials struct {
 }
 
 func GetClientCredentialsFromOAuthJson() (ClientCredentials, error) {
+
+	DecryptFile("Credentials_OAuthClient.json.enc")
+	defer os.Remove("Credentials_OAuthClient.json")
+	DecryptFile("Credentials_UsersRefreshTokens.json.enc")
+	defer os.Remove("Credentials_UsersRefreshTokens.json")
+
 	var c ClientCredentials
 	file, err := os.Open("Credentials_OAuthClient.json")
 	if err != nil {
@@ -252,6 +264,8 @@ func (c *ClientCredentials) GetRefreshTokensMap() (map[string]string, error) {
 
 	return c.RefreshTokens, nil
 }
+
+// #region Drive
 
 type Files struct {
 	Files         []File `json:"files"`
@@ -401,6 +415,10 @@ func (quota StorageQuota) SeeInGigaBytes() string {
 		float64(quota.Limit)/(1<<30), float64(quota.UsageInDrive)/(1<<30), float64(quota.Usage)/(1<<30), float64(quota.UsageInDriveTrash)/(1<<30), float64(quota.Free)/(1<<30))
 }
 
+// #endregion Drive
+// #region Photos
+// #endregion Photos
+
 // #endregion Google
 
 // #region Whatsapp
@@ -410,7 +428,15 @@ type WhatsappCredentials struct {
 }
 
 func GetWhatsappCredentials() (WhatsappCredentials, error) {
+
 	var WhatsappCredentials WhatsappCredentials
+
+	if err := DecryptFile("Credentials_Whatsapp.json.enc"); err != nil {
+		fmt.Println("Error decrypting file:", err)
+		return WhatsappCredentials, err
+	}
+	defer os.Remove("Credentials_Whatsapp.json")
+
 	file, err := os.Open("Credentials_Whatsapp.json")
 	if err != nil {
 		fmt.Println("Error opening file:", err)
@@ -475,7 +501,15 @@ type NgrokCredentials struct {
 }
 
 func GetNgrokCredentials() (NgrokCredentials, error) {
+
 	var c NgrokCredentials
+
+	if err := DecryptFile("Credentials_Ngrok.json.enc"); err != nil {
+		fmt.Println("Error decrypting file:", err)
+		return NgrokCredentials{}, err
+	}
+	defer os.Remove("Credentials_Ngrok.json")
+
 	file, err := os.Open("Credentials_Ngrok.json")
 	if err != nil {
 		fmt.Println("Error opening file:", err)
