@@ -7,6 +7,7 @@ import (
 	"crypto/cipher"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -20,19 +21,38 @@ import (
 	"golang.ngrok.com/ngrok/config"
 )
 
-// #region main
+// #region main (testing)
 
 func main() {
-	WhatsappCredentials, err := GetWhatsappCredentials()
+	GoogleCredentials, err := GetClientCredentialsFromOAuthJson()
 	if err != nil {
-		fmt.Println("Error getting whatsapp credentials:", err)
+		fmt.Println("Error getting client credentials:", err)
 		return
 	}
-	err = SendWhatsappMessage(WhatsappCredentials.AccessToken, "Hello from Go!", WhatsappCredentials.To)
+	accessToken, err := GoogleCredentials.GetAccessToken("franlegon.backup1@gmail.com")
 	if err != nil {
-		fmt.Println("Error sending message:", err)
+		fmt.Println("Error getting access token:", err)
 		return
 	}
+
+	mediaItems, err := ListMediaItems(accessToken.AccessToken)
+	if err != nil {
+		fmt.Println("Error listing media items:", err)
+		return
+	}
+	fmt.Println("--------------------------------------------------------")
+	fmt.Printf("Media Item:\n")
+	mediaitem := mediaItems.MediaItems[0]
+	fmt.Println(mediaitem)
+	fmt.Println("--------------------------------------------------------")
+	size, err := mediaitem.GetFileSize(accessToken.AccessToken)
+	if err != nil {
+		fmt.Println("Error getting file size:", err)
+		return
+	}
+	fmt.Printf("size: %d\n", size)
+	fmt.Printf("fileSize: %d", mediaitem.FileSize)
+
 }
 
 func main2() {
@@ -86,9 +106,9 @@ func main3() {
 	}
 }
 
-// #endregion main
+// #endregion main (testing)
 
-// #region Google
+// #region Encryption
 type EncryptionKey struct {
 	KeyBase64 string `json:"keyBase64"`
 	IvBase64  string `json:"ivBase64"`
@@ -160,6 +180,10 @@ func DecryptFile(filename string) error {
 	return nil
 }
 
+// #endregion Encryption
+
+// #region Google
+
 type AccessToken struct {
 	AccessToken string `json:"access_token"`
 	Duration    int    `json:"expires_in"`
@@ -189,10 +213,12 @@ type ClientCredentials struct {
 
 func GetClientCredentialsFromOAuthJson() (ClientCredentials, error) {
 
-	DecryptFile("Credentials_OAuthClient.json.enc")
+	err := DecryptFile("Credentials_OAuthClient.json.enc")
+	if err != nil {
+		fmt.Println("Error decrypting file:", err)
+		return ClientCredentials{}, err
+	}
 	defer os.Remove("Credentials_OAuthClient.json")
-	DecryptFile("Credentials_UsersRefreshTokens.json.enc")
-	defer os.Remove("Credentials_UsersRefreshTokens.json")
 
 	var c ClientCredentials
 	file, err := os.Open("Credentials_OAuthClient.json")
@@ -249,6 +275,13 @@ func (c *ClientCredentials) GetAccessToken(user string) (AccessToken, error) {
 }
 
 func (c *ClientCredentials) GetRefreshTokensMap() (map[string]string, error) {
+
+	err := DecryptFile("Credentials_UsersRefreshTokens.json.enc")
+	if err != nil {
+		return nil, err
+	}
+	defer os.Remove("Credentials_UsersRefreshTokens.json")
+
 	file, err := os.Open("Credentials_UsersRefreshTokens.json")
 	if err != nil {
 		return nil, err
@@ -416,7 +449,148 @@ func (quota StorageQuota) SeeInGigaBytes() string {
 }
 
 // #endregion Drive
+
 // #region Photos
+type MediaItem struct {
+	Id            string `json:"id"`
+	Description   string `json:"description"`
+	ProductUrl    string `json:"productUrl"`
+	BaseUrl       string `json:"baseUrl"`
+	MimeType      string `json:"mimeType"`
+	Filename      string `json:"filename"`
+	FileSize      int64
+	MediaMetadata struct {
+		CreationTime string `json:"creationTime"`
+		Width        string `json:"width"`
+		Height       string `json:"height"`
+	} `json:"mediaMetadata"`
+}
+type MediaItems struct {
+	MediaItems    []MediaItem `json:"mediaItems"`
+	NextPageToken string      `json:"nextPageToken,omitempty"`
+}
+
+func ListMediaItems(accessToken string) (MediaItems, error) {
+	var allMediaItems MediaItems
+	url := "https://photoslibrary.googleapis.com/v1/mediaItems" + "?fields=nextPageToken,mediaItems(id,description,productUrl,baseUrl,mimeType,filename,mediaMetadata)"
+	for {
+		req, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			return allMediaItems, err
+		}
+		req.Header.Set("Authorization", "Bearer "+accessToken)
+
+		// Add query parameters if nextPageToken exists
+		q := req.URL.Query()
+		if allMediaItems.NextPageToken != "" {
+			q.Add("pageToken", allMediaItems.NextPageToken)
+		}
+		req.URL.RawQuery = q.Encode()
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return allMediaItems, err
+		}
+		defer resp.Body.Close()
+
+		////VMT
+		//bodyBytes, _ := io.ReadAll(resp.Body)
+		//fmt.Println(string(bodyBytes))
+		////VMT
+
+		var pageMediaItems MediaItems
+		if err := json.NewDecoder(resp.Body).Decode(&pageMediaItems); err != nil {
+			return allMediaItems, err
+		}
+
+		// Append the files from the current page to the allFiles
+		allMediaItems.MediaItems = append(allMediaItems.MediaItems, pageMediaItems.MediaItems...)
+
+		// Break the loop if there is no nextPageToken
+		if pageMediaItems.NextPageToken == "" {
+			break
+		} else {
+			allMediaItems.NextPageToken = pageMediaItems.NextPageToken
+			//VMT for testing break
+		}
+	}
+
+	return allMediaItems, nil
+}
+
+func (m *MediaItem) GetFileSize(accessToken string) (int64, error) {
+	baseUrl := m.BaseUrl + "=d"
+	req, err := http.NewRequest("HEAD", baseUrl, nil)
+	if err != nil {
+		return 0, err
+	}
+
+	req.Header.Add("Authorization", "Bearer "+accessToken)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	// Check if Content-Length header is present
+	contentLength := resp.Header.Get("Content-Length")
+	if contentLength == "" {
+		return 0, errors.New("Content-Length header is missing")
+	}
+
+	// Convert Content-Length to int64
+	size, err := strconv.ParseInt(contentLength, 10, 64)
+	if err != nil {
+		return 0, err
+	}
+
+	// Update the FileSize field in the original MediaItem struct
+	m.FileSize = size
+	return size, nil
+}
+
+func (m MediaItem) StreamDownload(accessToken string) (io.ReadCloser, error) {
+	baseUrl := m.BaseUrl + "=d"
+	req, err := http.NewRequest("GET", baseUrl, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Authorization", "Bearer "+accessToken)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+
+	// The caller is responsible for closing the response body
+	return resp.Body, nil
+}
+
+func (m MediaItem) Download(accessToken string, filepath string, filename string) error {
+	ioReader, err := m.StreamDownload(accessToken)
+	if err != nil {
+		return err
+	} else if ioReader == nil {
+		return errors.New("failed to stream download")
+	}
+	defer ioReader.Close()
+
+	file, err := os.Create(filepath + filename)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	_, err = io.Copy(file, ioReader)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 // #endregion Photos
 
 // #endregion Google
