@@ -35,23 +35,15 @@ func main() {
 		return
 	}
 
-	mediaItems, err := ListMediaItems(accessToken.AccessToken)
+	sharedAlbums, err := GetSharedAlbums(accessToken.AccessToken)
 	if err != nil {
-		fmt.Println("Error listing media items:", err)
+		fmt.Println("Error getting shared albums:", err)
 		return
 	}
-	fmt.Println("--------------------------------------------------------")
-	fmt.Printf("Media Item:\n")
-	mediaitem := mediaItems.MediaItems[0]
-	fmt.Println(mediaitem)
-	fmt.Println("--------------------------------------------------------")
-	size, err := mediaitem.GetFileSize(accessToken.AccessToken)
-	if err != nil {
-		fmt.Println("Error getting file size:", err)
-		return
+	fmt.Println("Shared Albums:")
+	for _, album := range sharedAlbums {
+		fmt.Println(album)
 	}
-	fmt.Printf("size: %d\n", size)
-	fmt.Printf("fileSize: %d", mediaitem.FileSize)
 
 }
 
@@ -589,6 +581,38 @@ func (m MediaItem) Download(accessToken string, filepath string, filename string
 	}
 
 	return nil
+}
+
+type SharedAlbum struct {
+	Id              string `json:"id"`
+	Title           string `json:"title"`
+	MediaItemsCount int    `json:"mediaItemsCount"`
+	ProductUrl      string `json:"productUrl"`
+}
+
+func GetSharedAlbums(accessToken string) ([]SharedAlbum, error) {
+	var sharedAlbums []SharedAlbum
+	url := "https://photoslibrary.googleapis.com/v1/sharedAlbums"
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return sharedAlbums, err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return sharedAlbums, err
+	}
+	defer resp.Body.Close()
+
+	var albums struct {
+		SharedAlbums []SharedAlbum `json:"sharedAlbums"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&albums); err != nil {
+		return sharedAlbums, err
+	}
+
+	return albums.SharedAlbums, nil
 }
 
 // #endregion Photos
