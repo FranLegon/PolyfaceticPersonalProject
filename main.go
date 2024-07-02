@@ -26,6 +26,8 @@ import (
 // #region main (testing)
 
 func main() {
+	//DecryptFile("Credentials_UsersRefreshTokens.json.enc")
+	//return
 
 	db, err := GetSQLiteConnection()
 	if err != nil {
@@ -37,6 +39,41 @@ func main() {
 	//defer os.Remove("sqlite.db")
 	if err = CreateSQLiteTables(db); err != nil {
 		fmt.Println("Error creating SQLite tables:", err)
+		return
+	}
+
+	GoogleCredentials, err := GetClientCredentialsFromOAuthJson()
+	if err != nil {
+		fmt.Println("Error getting client credentials:", err)
+		return
+	}
+	accessToken, err := GoogleCredentials.GetAccessToken("franlegon.backup1@gmail.com")
+	if err != nil {
+		fmt.Println("Error getting access token:", err)
+		return
+	}
+	fmt.Println("Access Token:", accessToken.AccessToken)
+	files, err := ListFiles(accessToken.AccessToken)
+	if err != nil {
+		fmt.Println("Error listing files:", err)
+		return
+	}
+
+	err = InsertOrUpdateInSQLiteTable(files)
+	if err != nil {
+		fmt.Println("Error inserting files into SQLite:", err)
+		return
+	}
+
+	mediaItems, err := ListMediaItems(accessToken.AccessToken)
+	if err != nil {
+		fmt.Println("Error listing media items:", err)
+		return
+	}
+
+	err = InsertOrUpdateInSQLiteTable(mediaItems)
+	if err != nil {
+		fmt.Println("Error inserting media items into SQLite:", err)
 		return
 	}
 
@@ -354,6 +391,10 @@ func (c *ClientCredentials) GetAccessToken(user string) (AccessToken, error) {
 
 	tokenResp.RetrievedAt = time.Now()
 	c.AccessTokens[user] = tokenResp
+
+	if tokenResp.AccessToken == "" {
+		return c.AccessTokens[user], fmt.Errorf("access token is empty for user %s. Refresh token might be expired.", user)
+	}
 
 	return c.AccessTokens[user], nil
 }
@@ -934,38 +975,72 @@ func CreateSQLiteTables(db *sql.DB) error {
 	return nil
 }
 
-/*
-func InsertOrUpdateInSQLiteTable[D MediaItems | Files](db *sql.DB, data D) error {
+func (MediaItems MediaItems) GetValuesSlicesForSqlInsert() [][]interface{} {
+	var values [][]interface{}
+	for _, m := range MediaItems.MediaItems {
+		values = append(values, []interface{}{m.Id, m.Description, m.ProductUrl, m.BaseUrl, m.MimeType, m.Filename, m.FileSize, m.MediaMetadata.CreationTime, m.MediaMetadata.Width, m.MediaMetadata.Height})
+	}
+	return values
+}
+
+func (Files Files) GetValuesSlicesForSqlInsert() [][]interface{} {
+	var values [][]interface{}
+	for _, f := range Files.Files {
+		values = append(values, []interface{}{f.Id, f.Name, f.MimeType, f.Size, f.Owners[0].DisplayName, f.Owners[0].EmailAddress})
+	}
+	return values
+}
+
+type SqlValuesGenerator interface {
+	GetValuesSlicesForSqlInsert() [][]interface{}
+}
+
+func InsertOrUpdateInSQLiteTable(data SqlValuesGenerator) error {
 	var tableName string
-	var sqlStatement string
-	var dataToInsert [][]string
+	var columns []string
 	switch data.(type) {
 	case MediaItems:
 		tableName = "GooglePhotosMediaItems"
-		sqlStatement = `INSERT INTO ` + tableName + ` (id, description, productUrl, baseUrl, mimeType, filename, fileSize, creationTime, width, height) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(id) DO UPDATE SET description = ?, productUrl = ?, baseUrl = ?, mimeType = ?, filename = ?, fileSize = ?, creationTime = ?, width = ?, height = ?`
-		for _, item := range data.(MediaItems).MediaItems {
-			dataToInsert = append(dataToInsert, []string{
-				item.Id,
-				item.Description,
-				item.ProductUrl,
-				item.BaseUrl,
-				item.MimeType,
-				item.Filename,
-				strconv.FormatInt(item.FileSize, 10),
-				item.MediaMetadata.CreationTime,
-				item.MediaMetadata.Width,
-				item.MediaMetadata.Height,
-			})
-		}
+		columns = []string{"id", "description", "productUrl", "baseUrl", "mimeType", "filename", "fileSize", "creationTime", "width", "height"}
 	case Files:
 		tableName = "GoogleDriveFiles"
-		sqlStatement = `INSERT INTO ` + tableName + ` (id, name, mimeType, size, ownerDisplayName, ownerEmailAddress) VALUES (?, ?, ?, ?, ?, ?)
-		ON CONFLICT(id) DO UPDATE SET name = ?, mimeType = ?, size = ?, ownerDisplayName = ?, ownerEmailAddress = ?`
+		columns = []string{"id", "name", "mimeType", "size", "ownerDisplayName", "ownerEmailAddress"}
 	default:
 		panic("invalid data type in InsertOrUpdateInSQLiteTable")
-
 	}
+
+	// Generate placeholders for INSERT VALUES
+	insertPlaceholders := strings.Repeat("?, ", len(columns)-1) + "?"
+
+	// Generate placeholders for ON CONFLICT DO UPDATE SET
+	conflictColumns := columns[1:] // Exclude 'id' for the ON CONFLICT part
+	updatePlaceholders := make([]string, len(conflictColumns))
+	for i, col := range conflictColumns {
+		updatePlaceholders[i] = fmt.Sprintf("%s = ?", col)
+	}
+	updatePlaceholderStr := strings.Join(updatePlaceholders, ", ")
+
+	// Construct the full SQL statement
+	sqlStatement := fmt.Sprintf(`INSERT INTO %s (%s) VALUES (%s)
+		ON CONFLICT(id) DO UPDATE SET %s`, tableName, strings.Join(columns, ", "), insertPlaceholders, updatePlaceholderStr)
+
+	db, err := GetSQLiteConnection()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	rows := data.GetValuesSlicesForSqlInsert()
+
+	for _, row := range rows {
+		_, err := db.Exec(sqlStatement, append(row, row[1:]...)...)
+		if err != nil {
+			fmt.Println("Error inserting row: ", row)
+			return err
+		}
+	}
+
 	return nil
 }
-*/
+
+// #endregion SQLite
