@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -17,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	_ "github.com/mattn/go-sqlite3"
 	"golang.ngrok.com/ngrok"
 	"golang.ngrok.com/ngrok/config"
 )
@@ -24,6 +26,23 @@ import (
 // #region main (testing)
 
 func main() {
+
+	db, err := GetSQLiteConnection()
+	if err != nil {
+		fmt.Println("Error getting SQLite connection:", err)
+		return
+	}
+	defer db.Close()
+	//defer EncryptFile("sqlite.db")
+	//defer os.Remove("sqlite.db")
+	if err = CreateSQLiteTables(db); err != nil {
+		fmt.Println("Error creating SQLite tables:", err)
+		return
+	}
+
+}
+
+func main4() {
 	GoogleCredentials, err := GetClientCredentialsFromOAuthJson()
 	if err != nil {
 		fmt.Println("Error getting client credentials:", err)
@@ -106,26 +125,36 @@ type EncryptionKey struct {
 	IvBase64  string `json:"ivBase64"`
 }
 
-func DecryptFile(filename string) error {
+func GetEncryptionKey() ([]byte, []byte, error) {
 	// Read the encryption key JSON file
 	keyData, err := os.ReadFile("Credentials_EncriptionKey.json")
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 
 	// Unmarshal the JSON data into the EncryptionKey struct
 	var encKey EncryptionKey
 	err = json.Unmarshal(keyData, &encKey)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 
 	// Decode the base64 encoded key and IV
 	key, err := base64.StdEncoding.DecodeString(encKey.KeyBase64)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	iv, err := base64.StdEncoding.DecodeString(encKey.IvBase64)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return key, iv, nil
+}
+
+func DecryptFile(filename string) error {
+	// Get key
+	key, iv, err := GetEncryptionKey()
 	if err != nil {
 		return err
 	}
@@ -167,6 +196,69 @@ func DecryptFile(filename string) error {
 	err = os.WriteFile(decryptedFilename, ciphertext, 0644)
 	if err != nil {
 		return err
+	}
+
+	return nil
+}
+
+func EncryptFile(filename string) error {
+	// 1. Get Encryption Key and IV
+	key, iv, err := GetEncryptionKey()
+	if err != nil {
+		return err
+	}
+
+	// 2. Open the Source File for Reading
+	srcFile, err := os.Open(filename)
+	if err != nil {
+		return err
+	}
+	defer srcFile.Close()
+
+	// 3. Create the Destination File for Writing
+	encFilename := filename + ".enc"
+	dstFile, err := os.Create(encFilename)
+	if err != nil {
+		return err
+	}
+	defer dstFile.Close()
+
+	// 4. Initialize AES Cipher
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return err
+	}
+
+	// 5. Initialize CBC Mode for Encryption
+	mode := cipher.NewCBCEncrypter(block, iv)
+
+	// 6. Stream the File
+	buf := make([]byte, mode.BlockSize()*1024) // Adjust the buffer size as needed
+	for {
+		n, err := srcFile.Read(buf)
+		if err != nil && err != io.EOF {
+			return err
+		}
+		if n == 0 {
+			break
+		}
+
+		// Apply PKCS#7 padding if this is the last chunk
+		// Apply PKCS#7 padding if this is the last chunk
+		if n < len(buf) || err == io.EOF {
+			padding := mode.BlockSize() - n%mode.BlockSize()
+			padText := bytes.Repeat([]byte{byte(padding)}, padding)
+			buf = append(buf[:n], padText...)
+			mode.CryptBlocks(buf, buf)
+			dstFile.Write(buf)
+			break
+		}
+
+		// Encrypt and write the chunk
+		mode.CryptBlocks(buf, buf)
+		if _, err := dstFile.Write(buf); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -779,3 +871,67 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 }
 
 // #endregion ngrok
+
+// #region SQLite
+
+func GetSQLiteConnection() (*sql.DB, error) {
+
+	// Check if the file exists
+	if _, err := os.Stat("sqlite.db.enc"); err == nil {
+		if err := DecryptFile("sqlite.db.enc"); err != nil {
+			fmt.Println("Error decrypting file:", err)
+			return nil, err
+		}
+		fmt.Println("Remember to: \n defer EncryptFile(\"sqlite.db\") \n defer os.Remove(\"sqlite.db\")")
+	}
+
+	db, err := sql.Open("sqlite3", "sqlite.db")
+	if err != nil {
+		fmt.Println("Error opening SQLite connection:", err)
+		return nil, err
+	}
+	return db, nil
+}
+
+func CreateSQLiteTables(db *sql.DB) error {
+	tables := []string{"GoogleDriveFiles", "GooglePhotosMediaItems"}
+
+	for _, table := range tables {
+		var tableCreationQuery string
+		switch table {
+		case "GoogleDriveFiles":
+			tableCreationQuery = `CREATE TABLE IF NOT EXISTS GoogleDriveFiles (
+				id TEXT PRIMARY KEY,
+				name TEXT,
+				mimeType TEXT,
+				size INTEGER,
+				ownerDisplayName TEXT,
+				ownerEmailAddress TEXT
+			)`
+		case "GooglePhotosMediaItems":
+			tableCreationQuery = `CREATE TABLE IF NOT EXISTS GooglePhotosMediaItems (
+				id TEXT PRIMARY KEY,
+				description TEXT,
+				productUrl TEXT,
+				baseUrl TEXT,
+				mimeType TEXT,
+				filename TEXT,
+				fileSize INTEGER,
+				creationTime TEXT,
+				width TEXT,
+				height TEXT
+			)`
+		default:
+			return errors.New("invalid SQL table name")
+		}
+
+		_, err := db.Exec(tableCreationQuery)
+		if err != nil {
+			fmt.Println("Error creating table:", err)
+			return err
+		}
+	}
+	return nil
+}
+
+// #endregion SQLite
