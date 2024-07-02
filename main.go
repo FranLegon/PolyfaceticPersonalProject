@@ -18,9 +18,9 @@ import (
 	"strings"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
 	"golang.ngrok.com/ngrok"
 	"golang.ngrok.com/ngrok/config"
+	_ "modernc.org/sqlite"
 )
 
 // #region main (testing)
@@ -885,7 +885,7 @@ func GetSQLiteConnection() (*sql.DB, error) {
 		fmt.Println("Remember to: \n defer EncryptFile(\"sqlite.db\") \n defer os.Remove(\"sqlite.db\")")
 	}
 
-	db, err := sql.Open("sqlite3", "sqlite.db")
+	db, err := sql.Open("sqlite", "sqlite.db")
 	if err != nil {
 		fmt.Println("Error opening SQLite connection:", err)
 		return nil, err
@@ -934,4 +934,38 @@ func CreateSQLiteTables(db *sql.DB) error {
 	return nil
 }
 
-// #endregion SQLite
+/*
+func InsertOrUpdateInSQLiteTable[D MediaItems | Files](db *sql.DB, data D) error {
+	var tableName string
+	var sqlStatement string
+	var dataToInsert [][]string
+	switch data.(type) {
+	case MediaItems:
+		tableName = "GooglePhotosMediaItems"
+		sqlStatement = `INSERT INTO ` + tableName + ` (id, description, productUrl, baseUrl, mimeType, filename, fileSize, creationTime, width, height) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET description = ?, productUrl = ?, baseUrl = ?, mimeType = ?, filename = ?, fileSize = ?, creationTime = ?, width = ?, height = ?`
+		for _, item := range data.(MediaItems).MediaItems {
+			dataToInsert = append(dataToInsert, []string{
+				item.Id,
+				item.Description,
+				item.ProductUrl,
+				item.BaseUrl,
+				item.MimeType,
+				item.Filename,
+				strconv.FormatInt(item.FileSize, 10),
+				item.MediaMetadata.CreationTime,
+				item.MediaMetadata.Width,
+				item.MediaMetadata.Height,
+			})
+		}
+	case Files:
+		tableName = "GoogleDriveFiles"
+		sqlStatement = `INSERT INTO ` + tableName + ` (id, name, mimeType, size, ownerDisplayName, ownerEmailAddress) VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET name = ?, mimeType = ?, size = ?, ownerDisplayName = ?, ownerEmailAddress = ?`
+	default:
+		panic("invalid data type in InsertOrUpdateInSQLiteTable")
+
+	}
+	return nil
+}
+*/
