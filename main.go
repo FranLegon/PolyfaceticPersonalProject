@@ -25,7 +25,7 @@ import (
 
 // #region main (testing)
 
-func main() {
+func main5() {
 	//DecryptFile("Credentials_UsersRefreshTokens.json.enc")
 	//return
 
@@ -79,7 +79,7 @@ func main() {
 
 }
 
-func main4() {
+func main() {
 	GoogleCredentials, err := GetClientCredentialsFromOAuthJson()
 	if err != nil {
 		fmt.Println("Error getting client credentials:", err)
@@ -99,6 +99,19 @@ func main4() {
 	fmt.Println("Shared Albums:")
 	for _, album := range sharedAlbums {
 		fmt.Println(album)
+	}
+
+	sharedAlbum1 := sharedAlbums[0].Id
+	fmt.Printf("Shared Album id: %s\n", sharedAlbum1)
+
+	albumMediaItems, err := GetAlbumMediaItems(accessToken.AccessToken, sharedAlbum1)
+	if err != nil {
+		fmt.Println("Error getting album media items:", err)
+		return
+	}
+	fmt.Println("Album Media Items:")
+	for _, item := range albumMediaItems.MediaItems {
+		fmt.Println(item)
 	}
 
 }
@@ -589,6 +602,10 @@ type MediaItem struct {
 		Width        string `json:"width"`
 		Height       string `json:"height"`
 	} `json:"mediaMetadata"`
+	ContributorInfo struct {
+		ProfilePictureBaseUrl string `json:"profilePictureBaseUrl"`
+		DisplayName           string `json:"displayName"`
+	} `json:"contributorInfo"`
 }
 type MediaItems struct {
 	MediaItems    []MediaItem `json:"mediaItems"`
@@ -597,7 +614,7 @@ type MediaItems struct {
 
 func ListMediaItems(accessToken string) (MediaItems, error) {
 	var allMediaItems MediaItems
-	url := "https://photoslibrary.googleapis.com/v1/mediaItems" + "?fields=nextPageToken,mediaItems(id,description,productUrl,baseUrl,mimeType,filename,mediaMetadata)"
+	url := "https://photoslibrary.googleapis.com/v1/mediaItems" + "?fields=nextPageToken,mediaItems(id,description,productUrl,baseUrl,mimeType,filename,mediaMetadata(creationTime,width,height))"
 	for {
 		req, err := http.NewRequest("GET", url, nil)
 		if err != nil {
@@ -738,14 +755,85 @@ func GetSharedAlbums(accessToken string) ([]SharedAlbum, error) {
 	}
 	defer resp.Body.Close()
 
-	var albums struct {
-		SharedAlbums []SharedAlbum `json:"sharedAlbums"`
+	////VMT
+	//bodyBytes, _ := io.ReadAll(resp.Body)
+	//fmt.Println(string(bodyBytes))
+	////VMT
+
+	type SharedAlbum_WithStringMediaItemsCount struct {
+		Id              string `json:"id"`
+		Title           string `json:"title"`
+		MediaItemsCount string `json:"mediaItemsCount"`
+		ProductUrl      string `json:"productUrl"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&albums); err != nil {
+
+	var albums_WithStringMediaItemsCount struct {
+		SharedAlbums []SharedAlbum_WithStringMediaItemsCount `json:"sharedAlbums"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&albums_WithStringMediaItemsCount); err != nil {
 		return sharedAlbums, err
 	}
 
-	return albums.SharedAlbums, nil
+	var albums []SharedAlbum
+	for _, album := range albums_WithStringMediaItemsCount.SharedAlbums {
+		mediaItemsCount_AsInt, err := strconv.Atoi(album.MediaItemsCount)
+		if err != nil {
+			return sharedAlbums, err
+		}
+		albums = append(albums, SharedAlbum{Id: album.Id, Title: album.Title, MediaItemsCount: mediaItemsCount_AsInt, ProductUrl: album.ProductUrl})
+	}
+
+	return albums, nil
+}
+
+func GetAlbumMediaItems(accessToken string, albumId string) (MediaItems, error) {
+	var allMediaItems MediaItems
+	url := "https://photoslibrary.googleapis.com/v1/mediaItems:search"
+
+	requestBody := map[string]interface{}{
+		"albumId":  albumId,
+		"pageSize": 50, // Optional: Adjust pageSize as needed
+	}
+	requestBodyBytes, err := json.Marshal(requestBody)
+	if err != nil {
+		return allMediaItems, err
+	}
+	for {
+		req, err := http.NewRequest("POST", url, bytes.NewBuffer(requestBodyBytes))
+		if err != nil {
+			return allMediaItems, err
+		}
+		req.Header.Set("Authorization", "Bearer "+accessToken)
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return allMediaItems, err
+		}
+		defer resp.Body.Close()
+
+		////VMT
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		fmt.Println(string(bodyBytes))
+		////VMT
+
+		var pageMediaItems MediaItems
+		if err := json.NewDecoder(resp.Body).Decode(&pageMediaItems); err != nil {
+			return allMediaItems, err
+		}
+
+		// Append the files from the current page to the allFiles
+		allMediaItems.MediaItems = append(allMediaItems.MediaItems, pageMediaItems.MediaItems...)
+
+		// Break the loop if there is no nextPageToken
+		if pageMediaItems.NextPageToken == "" {
+			break
+		} else {
+			allMediaItems.NextPageToken = pageMediaItems.NextPageToken
+		}
+	}
+
+	return allMediaItems, nil
 }
 
 // #endregion Photos
