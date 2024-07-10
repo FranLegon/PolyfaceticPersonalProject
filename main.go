@@ -47,7 +47,7 @@ func main5() {
 		fmt.Println("Error getting client credentials:", err)
 		return
 	}
-	accessToken, err := GoogleCredentials.GetAccessToken("franlegon.backup1@gmail.com")
+	accessToken, err := GoogleCredentials.GetAccessToken("franlegon.backup5@gmail.com")
 	if err != nil {
 		fmt.Println("Error getting access token:", err)
 		return
@@ -80,18 +80,24 @@ func main5() {
 }
 
 func main() {
+	//EncryptFile("Credentials_UsersRefreshTokens.json")
+	//return
 	GoogleCredentials, err := GetClientCredentialsFromOAuthJson()
 	if err != nil {
 		fmt.Println("Error getting client credentials:", err)
 		return
 	}
-	accessToken, err := GoogleCredentials.GetAccessToken("franlegon.backup1@gmail.com")
+	accessToken1, err := GoogleCredentials.GetAccessToken("franlegon.backup1@gmail.com")
 	if err != nil {
 		fmt.Println("Error getting access token:", err)
 		return
 	}
-
-	sharedAlbums, err := GetSharedAlbums(accessToken.AccessToken)
+	accessToken5, err := GoogleCredentials.GetAccessToken("franlegon.backup5@gmail.com")
+	if err != nil {
+		fmt.Println("Error getting access token:", err)
+		return
+	}
+	sharedAlbums, err := GetSharedAlbums(accessToken1.AccessToken)
 	if err != nil {
 		fmt.Println("Error getting shared albums:", err)
 		return
@@ -103,16 +109,77 @@ func main() {
 
 	sharedAlbum1 := sharedAlbums[0].Id
 	fmt.Printf("Shared Album id: %s\n", sharedAlbum1)
+	fmt.Printf("Shared Album name: %s\n", sharedAlbums[0].Title)
 
-	albumMediaItems, err := GetAlbumMediaItems(accessToken.AccessToken, sharedAlbum1)
+	albumMediaItems, err := GetAlbumMediaItems(accessToken1.AccessToken, sharedAlbum1)
 	if err != nil {
 		fmt.Println("Error getting album media items:", err)
 		return
 	}
-	fmt.Println("Album Media Items:")
-	for _, item := range albumMediaItems.MediaItems {
-		fmt.Println(item)
+	fmt.Println("albumMediaItems.MediaItems[0]:")
+	fmt.Println(albumMediaItems.MediaItems[0])
+
+	//mediaItemIds := albumMediaItems.GetMediaItemIds()
+
+	/*
+		album2, err := CreateAlbum(accessToken.AccessToken, "My Shared Album (TESTING)")
+		if err != nil {
+			fmt.Println("Error creating shared album:", err)
+			return
+		}
+		fmt.Printf("Created shared album id: %s\n", album2)
+
+		shareInfo, err := ShareAlbum(accessToken.AccessToken, album2)
+		if err != nil {
+			fmt.Println("Error sharing album:", err)
+			return
+		}
+		fmt.Println("ShareInfo:")
+		fmt.Println(shareInfo)
+	*/
+
+	/*
+		err = AddMediaItemsToAlbum(accessToken.AccessToken, album2, mediaItemIds)
+		if err != nil {
+			fmt.Println("Error adding media items to album:", err)
+			return
+		}
+			fmt.Println("Media items added to album successfully")
+	*/
+
+	ioReader, err := albumMediaItems.MediaItems[0].StreamDownload(accessToken1.AccessToken)
+	if err != nil {
+		fmt.Println("Error streaming download:", err)
+		return
 	}
+	defer ioReader.Close()
+
+	uploadedMediaItem, err := UploadMediaItemAsStream(accessToken5.AccessToken, ioReader, albumMediaItems.MediaItems[0].Filename+" testing")
+	if err != nil {
+		fmt.Println("Error uploading media item:", err)
+		return
+	}
+	fmt.Println("Uploaded Media Item:")
+	fmt.Println(uploadedMediaItem)
+
+	/*
+		fmt.Println(albumMediaItems.MediaItems[0].BaseUrl)
+
+		if err = albumMediaItems.MediaItems[0].Download(accessToken.AccessToken, os.TempDir(), albumMediaItems.MediaItems[0].Filename); err != nil {
+			fmt.Println("Error downloading media item:", err)
+			return
+		}
+		fmt.Println("Media item downloaded successfully. os.TempDir():", os.TempDir(), "filename:", albumMediaItems.MediaItems[0].Filename)
+		mediaItem, err := UploadMediaItem(accessToken.AccessToken, os.TempDir(), albumMediaItems.MediaItems[0].Filename)
+		if err != nil {
+			fmt.Println("Error uploading media item:", err)
+			return
+		}
+		fmt.Println("Uploaded Media Item:")
+		fmt.Println(mediaItem)
+	*/
+
+	//fmt.Println("Media items added to album successfully")
 
 }
 
@@ -127,7 +194,7 @@ func main2() {
 	////
 	fmt.Println("Client ID:", ClientCredentials.ClientID)
 
-	accessToken, err := ClientCredentials.GetAccessToken("franlegon.backup1@gmail.com")
+	accessToken, err := ClientCredentials.GetAccessToken("franlegon.backup5@gmail.com")
 	if err != nil {
 		fmt.Println("Error getting access token:", err)
 		return
@@ -693,7 +760,14 @@ func (m *MediaItem) GetFileSize(accessToken string) (int64, error) {
 }
 
 func (m MediaItem) StreamDownload(accessToken string) (io.ReadCloser, error) {
-	baseUrl := m.BaseUrl + "=d"
+	var baseUrl string
+	if strings.HasPrefix(m.MimeType, "image/") {
+		baseUrl = m.BaseUrl + "=d"
+	} else if strings.HasPrefix(m.MimeType, "video/") {
+		baseUrl = m.BaseUrl + "=dv"
+	} else {
+		return nil, errors.New("unsupported media type")
+	}
 	req, err := http.NewRequest("GET", baseUrl, nil)
 	if err != nil {
 		return nil, err
@@ -707,6 +781,7 @@ func (m MediaItem) StreamDownload(accessToken string) (io.ReadCloser, error) {
 	}
 
 	// The caller is responsible for closing the response body
+	fmt.Println("Remenber to close the response body")
 	return resp.Body, nil
 }
 
@@ -731,6 +806,14 @@ func (m MediaItem) Download(accessToken string, filepath string, filename string
 	}
 
 	return nil
+}
+
+func (m MediaItems) GetMediaItemIds() []string {
+	var ids []string
+	for _, item := range m.MediaItems {
+		ids = append(ids, item.Id)
+	}
+	return ids
 }
 
 type SharedAlbum struct {
@@ -776,6 +859,11 @@ func GetSharedAlbums(accessToken string) ([]SharedAlbum, error) {
 
 	var albums []SharedAlbum
 	for _, album := range albums_WithStringMediaItemsCount.SharedAlbums {
+		fmt.Print(album.MediaItemsCount) //VMT
+		if album.MediaItemsCount == "" {
+			album.MediaItemsCount = "0"
+		}
+
 		mediaItemsCount_AsInt, err := strconv.Atoi(album.MediaItemsCount)
 		if err != nil {
 			return sharedAlbums, err
@@ -790,15 +878,23 @@ func GetAlbumMediaItems(accessToken string, albumId string) (MediaItems, error) 
 	var allMediaItems MediaItems
 	url := "https://photoslibrary.googleapis.com/v1/mediaItems:search"
 
+	// Initialize requestBody outside the loop
 	requestBody := map[string]interface{}{
 		"albumId":  albumId,
 		"pageSize": 50, // Optional: Adjust pageSize as needed
 	}
-	requestBodyBytes, err := json.Marshal(requestBody)
-	if err != nil {
-		return allMediaItems, err
-	}
+
 	for {
+		// Update requestBody with nextPageToken if it exists
+		if allMediaItems.NextPageToken != "" {
+			requestBody["pageToken"] = allMediaItems.NextPageToken
+		}
+
+		requestBodyBytes, err := json.Marshal(requestBody)
+		if err != nil {
+			return allMediaItems, err
+		}
+
 		req, err := http.NewRequest("POST", url, bytes.NewBuffer(requestBodyBytes))
 		if err != nil {
 			return allMediaItems, err
@@ -812,28 +908,354 @@ func GetAlbumMediaItems(accessToken string, albumId string) (MediaItems, error) 
 		}
 		defer resp.Body.Close()
 
-		////VMT
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		fmt.Println(string(bodyBytes))
-		////VMT
-
 		var pageMediaItems MediaItems
 		if err := json.NewDecoder(resp.Body).Decode(&pageMediaItems); err != nil {
 			return allMediaItems, err
 		}
 
-		// Append the files from the current page to the allFiles
 		allMediaItems.MediaItems = append(allMediaItems.MediaItems, pageMediaItems.MediaItems...)
+
+		// Update the nextPageToken for the next iteration
+		allMediaItems.NextPageToken = pageMediaItems.NextPageToken
 
 		// Break the loop if there is no nextPageToken
 		if pageMediaItems.NextPageToken == "" {
 			break
 		} else {
-			allMediaItems.NextPageToken = pageMediaItems.NextPageToken
+			break //VMT for testing
 		}
 	}
 
 	return allMediaItems, nil
+}
+
+func CreateAlbum(accessToken string, title string) (string, error) {
+	url := "https://photoslibrary.googleapis.com/v1/albums"
+	jsonPayload := fmt.Sprintf(`{
+		"album": {
+			"title": "%s"
+		}
+	}`, title)
+
+	req, err := http.NewRequest("POST", url, strings.NewReader(jsonPayload))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	////VMT
+	//bodyBytes, _ := io.ReadAll(resp.Body)
+	//fmt.Println(string(bodyBytes))
+	////VMT
+
+	var album struct {
+		Id string `json:"id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&album); err != nil {
+		return "", err
+	}
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		return "", fmt.Errorf("failed to create album: %s", resp.Status)
+	}
+
+	return album.Id, nil
+}
+
+func AddMediaItemsToAlbum(accessToken string, albumId string, mediaItemIds []string) error {
+	const batchSize = 50
+	for i := 0; i < len(mediaItemIds); i += batchSize {
+		end := i + batchSize
+		if end > len(mediaItemIds) {
+			end = len(mediaItemIds)
+		}
+		batch := mediaItemIds[i:end]
+
+		url := "https://photoslibrary.googleapis.com/v1/albums/" + albumId + ":batchAddMediaItems"
+		jsonPayload := fmt.Sprintf(`{
+			"mediaItemIds": [%s]
+		}`, "\""+strings.Join(batch, "\",\"")+"\"")
+
+		fmt.Print(jsonPayload) //VMT
+
+		req, err := http.NewRequest("POST", url, strings.NewReader(jsonPayload))
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Authorization", "Bearer "+accessToken)
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+
+		////VMT
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		fmt.Println(string(bodyBytes))
+		////VMT
+
+		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+			return fmt.Errorf("failed to add media items to album in batch %d-%d: %s", i, end-1, resp.Status)
+		}
+	}
+	return nil
+}
+
+func RemoveMediaItemsFromAlbum(accessToken string, albumId string, mediaItemIds []string) error {
+	const batchSize = 50
+	for i := 0; i < len(mediaItemIds); i += batchSize {
+		end := i + batchSize
+		if end > len(mediaItemIds) {
+			end = len(mediaItemIds)
+		}
+		batch := mediaItemIds[i:end]
+
+		url := "https://photoslibrary.googleapis.com/v1/albums/" + albumId + ":batchRemoveMediaItems"
+		jsonPayload := fmt.Sprintf(`{
+			"mediaItemIds": [%s]
+		}`, "\""+strings.Join(batch, "\",\"")+"\"")
+
+		req, err := http.NewRequest("POST", url, strings.NewReader(jsonPayload))
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Authorization", "Bearer "+accessToken)
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+			return fmt.Errorf("failed to remove media items from album in batch %d-%d: %s", i, end-1, resp.Status)
+		}
+	}
+	return nil
+}
+
+type ShareInfo struct {
+	SharedAlbumOptions struct {
+		IsCollaborative bool `json:"isCollaborative"`
+		IsCommentable   bool `json:"isCommentable"`
+	} `json:"sharedAlbumOptions"`
+	ShareableUrl string `json:"shareableUrl"`
+	ShareToken   string `json:"shareToken"`
+	IsJoined     bool   `json:"isJoined"`
+	IsOwned      bool   `json:"isOwned"`
+	IsJoinable   bool   `json:"isJoinable"`
+}
+
+func ShareAlbum(accessToken string, albumId string) (ShareInfo, error) {
+	var ShareInfo ShareInfo
+	url := "https://photoslibrary.googleapis.com/v1/albums/" + albumId + ":share"
+	req, err := http.NewRequest("POST", url, strings.NewReader(`{
+			"sharedAlbumOptions": {
+				"isCollaborative": true,
+				"isCommentable": true
+			}
+		}`))
+	if err != nil {
+		return ShareInfo, err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return ShareInfo, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		return ShareInfo, fmt.Errorf("failed to share album: %s", resp.Status)
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&ShareInfo); err != nil {
+		return ShareInfo, err
+	}
+
+	return ShareInfo, nil
+}
+
+func JoinSharedAlbum(accessToken string, shareToken string) error {
+	url := "https://photoslibrary.googleapis.com/v1/sharedAlbums:join"
+	req, err := http.NewRequest("POST", url, strings.NewReader(`{
+		"shareToken": "`+shareToken+`"
+	}`))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		return fmt.Errorf("failed to join shared album: %s", resp.Status)
+	}
+
+	return nil
+}
+
+func UploadMediaItem(accessToken string, filepath string, filename string) (MediaItem, error) {
+	// 1. Open the file for reading
+	file, err := os.Open(filepath + filename)
+	if err != nil {
+		return MediaItem{}, err
+	}
+	defer file.Close()
+
+	// 2. Create the request
+	url := "https://photoslibrary.googleapis.com/v1/uploads"
+	req, err := http.NewRequest("POST", url, file)
+	if err != nil {
+		return MediaItem{}, err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Content-Type", "application/octet-stream")
+	req.Header.Set("X-Goog-Upload-File-Name", filename)
+
+	// 3. Execute the request
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return MediaItem{}, err
+	}
+	defer resp.Body.Close()
+
+	// 4. Read the response body
+	uploadToken, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return MediaItem{}, err
+	}
+
+	// 5. Create the media item
+	url = "https://photoslibrary.googleapis.com/v1/mediaItems:batchCreate"
+	jsonPayload := fmt.Sprintf(`{
+		"newMediaItems": [
+			{
+				"description": "%s",
+				"simpleMediaItem": {
+					"uploadToken": "%s"
+				}
+			}
+		]
+	}`, filename, uploadToken)
+
+	req, err = http.NewRequest("POST", url, strings.NewReader(jsonPayload))
+	if err != nil {
+		return MediaItem{}, err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		return MediaItem{}, err
+	}
+	defer resp.Body.Close()
+
+	// 6. Decode the response
+	var mediaItem struct {
+		NewMediaItemResults []MediaItem `json:"newMediaItemResults"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&mediaItem); err != nil {
+		return MediaItem{}, err
+	}
+
+	return mediaItem.NewMediaItemResults[0], nil
+}
+
+func UploadMediaItemAsStream(accessToken string, ioReader io.Reader, filename string) (MediaItem, error) {
+	// 1. Create the request
+	url := "https://photoslibrary.googleapis.com/v1/uploads"
+	req, err := http.NewRequest("POST", url, ioReader)
+	if err != nil {
+		return MediaItem{}, err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Content-Type", "application/octet-stream")
+	req.Header.Set("X-Goog-Upload-File-Name", filename)
+
+	// 2. Execute the request
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return MediaItem{}, err
+	}
+	defer resp.Body.Close()
+
+	// 3. Read the response body
+	uploadToken, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return MediaItem{}, err
+	}
+
+	// 4. Create the media item
+	url = "https://photoslibrary.googleapis.com/v1/mediaItems:batchCreate"
+	jsonPayload := fmt.Sprintf(`{
+		"newMediaItems": [
+			{
+				"description": "%s",
+				"simpleMediaItem": {
+					"uploadToken": "%s"
+				}
+			}
+		]
+	}`, filename, uploadToken)
+
+	req, err = http.NewRequest("POST", url, strings.NewReader(jsonPayload))
+	if err != nil {
+		return MediaItem{}, err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		return MediaItem{}, err
+	}
+	defer resp.Body.Close()
+
+	// 5. Decode the response
+	////VMT
+	//bodyBytes, _ := io.ReadAll(resp.Body)
+	//fmt.Println(string(bodyBytes))
+	////VMT
+
+	type MediaItemResult struct {
+		UploadToken string `json:"uploadToken"`
+		Status      struct {
+			Message string `json:"message"`
+		} `json:"status"`
+		MediaItem MediaItem `json:"mediaItem"`
+	}
+
+	type Response struct {
+		NewMediaItemResults []MediaItemResult `json:"newMediaItemResults"`
+	}
+
+	// Assuming resp.Body is the body of the HTTP response
+	var response Response
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		// Handle error
+		return MediaItem{}, err
+	}
+
+	return response.NewMediaItemResults[0].MediaItem, nil
 }
 
 // #endregion Photos
