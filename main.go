@@ -25,6 +25,68 @@ import (
 
 // #region main (testing)
 
+func main() {
+	if err := DecryptFile("Credentials_UsersRefreshTokens.json.enc"); err != nil {
+		log.Fatal(err)
+	}
+
+	// Get the client credentials from the OAuth JSON file
+	ClientCredentials, err := GetClientCredentialsFromOAuthJson()
+	if err != nil {
+		fmt.Println("Error getting client credentials:", err)
+		return
+	}
+
+	// Get the access token for the user
+	accessToken1, err := ClientCredentials.GetAccessToken("franlegon.backup1@gmail.com")
+	if err != nil {
+		fmt.Println("Error getting access token:", err)
+		return
+	}
+	accessToken5, err := ClientCredentials.GetAccessToken("franlegon.backup5@gmail.com")
+	if err != nil {
+		fmt.Println("Error getting access token:", err)
+		return
+	}
+
+	// List the files in the user's Google Drive
+	files, err := ListFiles(accessToken1.AccessToken)
+	if err != nil {
+		fmt.Println("Error listing files:", err)
+		return
+	}
+	testFile := files.Files[0]
+	fmt.Println("testFile:")
+	fmt.Println(testFile)
+
+	/*
+		// Transfer ownership of the first file to the second user
+		fmt.Println("Access Token 1:", accessToken1.AccessToken)
+		err = TransferOwnership(testFile.Id, accessToken1.AccessToken, "franlegon.backup5@gmail.com")
+		if err != nil {
+			fmt.Println("Error transferring ownership:", err)
+			return
+		}
+		fmt.Println("Ownership transferred successfully")
+	*/
+
+	fileReader, err := testFile.StreamDownload(accessToken1.AccessToken)
+	if err != nil {
+		fmt.Println("Error streaming download:", err)
+		return
+	}
+	defer fileReader.Close()
+
+	uploadedFile, err := UploadFileAsStream(accessToken5.AccessToken, fileReader, testFile.Name)
+	if err != nil {
+		fmt.Println("Error uploading file:", err)
+		return
+	}
+	fmt.Println("Uploaded File:")
+	fmt.Println(uploadedFile)
+
+}
+
 func main5() {
 	//DecryptFile("Credentials_UsersRefreshTokens.json.enc")
 	//return
@@ -76,10 +138,9 @@ func main5() {
 		fmt.Println("Error inserting media items into SQLite:", err)
 		return
 	}
-
 }
 
-func main() {
+func main4() {
 	//EncryptFile("Credentials_UsersRefreshTokens.json")
 	//return
 	GoogleCredentials, err := GetClientCredentialsFromOAuthJson()
@@ -161,26 +222,6 @@ func main() {
 	}
 	fmt.Println("Uploaded Media Item:")
 	fmt.Println(uploadedMediaItem)
-
-	/*
-		fmt.Println(albumMediaItems.MediaItems[0].BaseUrl)
-
-		if err = albumMediaItems.MediaItems[0].Download(accessToken.AccessToken, os.TempDir(), albumMediaItems.MediaItems[0].Filename); err != nil {
-			fmt.Println("Error downloading media item:", err)
-			return
-		}
-		fmt.Println("Media item downloaded successfully. os.TempDir():", os.TempDir(), "filename:", albumMediaItems.MediaItems[0].Filename)
-		mediaItem, err := UploadMediaItem(accessToken.AccessToken, os.TempDir(), albumMediaItems.MediaItems[0].Filename)
-		if err != nil {
-			fmt.Println("Error uploading media item:", err)
-			return
-		}
-		fmt.Println("Uploaded Media Item:")
-		fmt.Println(mediaItem)
-	*/
-
-	//fmt.Println("Media items added to album successfully")
-
 }
 
 func main2() {
@@ -569,7 +610,7 @@ func TransferOwnership(fileID string, accessToken string, newOwnerEmail string) 
 		"role": "owner",
 		"type": "user",
 		"emailAddress": "`+newOwnerEmail+`",
-		"TransferOwnership": true
+		"transferOwnership": true
 	}`))
 	if err != nil {
 		return err
@@ -651,6 +692,68 @@ func GetStorageQuota(accessToken string) (StorageQuota, error) {
 func (quota StorageQuota) SeeInGigaBytes() string {
 	return fmt.Sprintf("Limit: %.2f GB, UsageInDrive: %.2f GB, Usage: %.2f GB, UsageInDriveTrash: %.2f GB, Free: %.2f GB",
 		float64(quota.Limit)/(1<<30), float64(quota.UsageInDrive)/(1<<30), float64(quota.Usage)/(1<<30), float64(quota.UsageInDriveTrash)/(1<<30), float64(quota.Free)/(1<<30))
+}
+
+func (f File) StreamDownload(accessToken string) (io.ReadCloser, error) {
+	req, err := http.NewRequest("GET", "https://www.googleapis.com/drive/v3/files/"+f.Id+"?alt=media", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+
+	// The caller is responsible for closing the response body
+	fmt.Println("Remenber to close the response body")
+	return resp.Body, nil
+}
+
+func (f File) Download(accessToken string, filepath string) error {
+	ioReader, err := f.StreamDownload(accessToken)
+	if err != nil {
+		return err
+	}
+	defer ioReader.Close()
+
+	file, err := os.Create(filepath + f.Name)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	_, err = io.Copy(file, ioReader)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func UploadFileAsStream(accessToken string, ioReader io.Reader, filename string) (File, error) {
+	url := "https://www.googleapis.com/upload/drive/v3/files?uploadType=media"
+	req, err := http.NewRequest("POST", url, ioReader)
+	if err != nil {
+		return File{}, err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Content-Type", "application/octet-stream")
+	req.Header.Set("Content-Length", "0") // Required for POST requests
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return File{}, err
+	}
+	defer resp.Body.Close()
+
+	var file File
+	if err := json.NewDecoder(resp.Body).Decode(&file); err != nil {
+		return File{}, err
+	}
+
+	return file, nil
 }
 
 // #endregion Drive
