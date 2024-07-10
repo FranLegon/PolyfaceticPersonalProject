@@ -5,14 +5,18 @@ import (
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"os"
 	"strconv"
 	"strings"
@@ -76,8 +80,19 @@ func main() {
 		return
 	}
 	defer fileReader.Close()
+	fileReaderCopy, err := testFile.StreamDownload(accessToken1.AccessToken)
+	if err != nil {
+		fmt.Println("Error streaming download:", err)
+		return
+	}
+	defer fileReaderCopy.Close()
 
-	uploadedFile, err := UploadFileAsStream(accessToken5.AccessToken, fileReader, testFile.Name)
+	hash, err := CalculateSHA256Hash(fileReaderCopy)
+	if err != nil {
+		fmt.Println("Error calculating SHA256 hash:", err)
+		return
+	}
+	uploadedFile, err := UploadFileAsStream(accessToken5.AccessToken, fileReader, testFile.Name, hash)
 	if err != nil {
 		fmt.Println("Error uploading file:", err)
 		return
@@ -732,7 +747,7 @@ func (f File) Download(accessToken string, filepath string) error {
 	return nil
 }
 
-func UploadFileAsStream(accessToken string, ioReader io.Reader, filename string) (File, error) {
+func SimpleUploadFileAsStream(accessToken string, ioReader io.Reader, filename string) (File, error) {
 	url := "https://www.googleapis.com/upload/drive/v3/files?uploadType=media"
 	req, err := http.NewRequest("POST", url, ioReader)
 	if err != nil {
@@ -741,6 +756,70 @@ func UploadFileAsStream(accessToken string, ioReader io.Reader, filename string)
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("Content-Type", "application/octet-stream")
 	req.Header.Set("Content-Length", "0") // Required for POST requests
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return File{}, err
+	}
+	defer resp.Body.Close()
+
+	var file File
+	if err := json.NewDecoder(resp.Body).Decode(&file); err != nil {
+		return File{}, err
+	}
+
+	return file, nil
+}
+
+// Multipart Upload
+func UploadFileAsStream(accessToken string, ioReader io.Reader, filename string, hash string) (File, error) {
+	url := "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart"
+
+	var requestBody bytes.Buffer
+	multipartWriter := multipart.NewWriter(&requestBody)
+
+	// Part 1: JSON Metadata
+	metadataPart, err := multipartWriter.CreatePart(textproto.MIMEHeader{
+		"Content-Type": []string{"application/json; charset=UTF-8"},
+	})
+	if err != nil {
+		return File{}, err
+	}
+	//hash, err := CalculateSHA256Hash(ioReader)
+	//if err != nil {
+	//	return File{}, err
+	//}
+	metadata := map[string]interface{}{
+		"name":        filename,
+		"description": hash,
+		"appProperties": map[string]string{
+			"SHA256": hash,
+		},
+	}
+	if err := json.NewEncoder(metadataPart).Encode(metadata); err != nil {
+		return File{}, err
+	}
+
+	// Part 2: File Content
+	filePart, err := multipartWriter.CreateFormFile("file", filename)
+	if err != nil {
+		return File{}, err
+	}
+	if _, err := io.Copy(filePart, ioReader); err != nil {
+		return File{}, err
+	}
+
+	// Finalize the multipart message
+	if err := multipartWriter.Close(); err != nil {
+		return File{}, err
+	}
+
+	req, err := http.NewRequest("POST", url, &requestBody)
+	if err != nil {
+		return File{}, err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Content-Type", multipartWriter.FormDataContentType())
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -1657,3 +1736,16 @@ func InsertOrUpdateInSQLiteTable(data SqlValuesGenerator) error {
 }
 
 // #endregion SQLite
+
+// #region Others
+func CalculateSHA256Hash(ioReader io.Reader) (string, error) {
+	hasher := sha256.New()
+	if _, err := io.Copy(hasher, ioReader); err != nil {
+		return "", err
+	}
+	hashBytes := hasher.Sum(nil)
+	hashString := hex.EncodeToString(hashBytes)
+	return hashString, nil
+}
+
+// #endregion Others
