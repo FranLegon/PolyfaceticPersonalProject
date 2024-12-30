@@ -771,14 +771,14 @@ func TransferFile(actualOwnerAccessToken string, file File, newOwnerEmail string
 		return err
 	}
 	if err = DeleteFile(file.Id, actualOwnerAccessToken); err != nil {
-		fmt.Printf("Error deleting file with id %s: %v", file.Id, err)
+		fmt.Printf("Error deleting file with id %s: %v\n", file.Id, err)
 		return err
 	}
 
 	for _, parentID := range file.Parents {
 		err = ShareFileOrFolder(parentID, actualOwnerAccessToken, newOwnerEmail, "writer")
 		if err != nil {
-			fmt.Println("Error sharing folder:", err)
+			fmt.Printf("Error sharing folder with id %s (from parents \"%s\"): %v\n", parentID, file.Parents, err)
 			return err
 		}
 	}
@@ -801,6 +801,7 @@ func TransferFile(actualOwnerAccessToken string, file File, newOwnerEmail string
 		}
 	}
 
+	fmt.Printf("✔️ \"%s\" transferred successfully to %s", file.Name, newOwnerEmail)
 	return nil
 }
 
