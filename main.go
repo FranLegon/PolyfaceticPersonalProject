@@ -27,270 +27,165 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+const (
+	mainAccount = "franlegon.backup10@gmail.com"
+)
+
+var backupAccounts = []string{"franlegon.backup11@gmail.com"}
+
 // #region main (testing)
 
 func main() {
-	if err := DecryptFile("Credentials_UsersRefreshTokens.json.enc"); err != nil {
+	//decript ngrok creds json file
+	//if err := DecryptFile("Credentials_OAuthClient.json.enc"); err != nil {
+	//	log.Fatal(err)
+	//}
+
+	GoogleCredentials, err := GetClientCredentialsFromOAuthJson()
+	if err != nil {
+		fmt.Println("Error getting client credentials:", err)
+		return
+	}
+	accessTokenMain, err := GoogleCredentials.GetAccessToken(mainAccount)
+	if err != nil {
+		fmt.Println("Error getting access token:", err)
+		return
+	}
+
+	if err := FillSQLiteTableFromGoogleDrive(accessTokenMain.AccessToken); err != nil {
+		fmt.Println("Error filling SQLite table:", err)
+		return
+	}
+
+	/*
+		if err := ShareAllFoldersFromMainAccountToAllBackupAccounts(); err != nil {
+			log.Fatal(err)
+		}
+	*/
+
+	if err := TransferAllFilesFromMainAccountToABackupAccount(); err != nil {
 		log.Fatal(err)
 	}
 
-	// Get the client credentials from the OAuth JSON file
-	ClientCredentials, err := GetClientCredentialsFromOAuthJson()
-	if err != nil {
-		fmt.Println("Error getting client credentials:", err)
-		return
-	}
-
-	// Get the access token for the user
-	accessToken1, err := ClientCredentials.GetAccessToken("franlegon.backup1@gmail.com")
-	if err != nil {
-		fmt.Println("Error getting access token:", err)
-		return
-	}
-	accessToken5, err := ClientCredentials.GetAccessToken("franlegon.backup5@gmail.com")
-	if err != nil {
-		fmt.Println("Error getting access token:", err)
-		return
-	}
-
-	// List the files in the user's Google Drive
-	files, err := ListFiles(accessToken1.AccessToken)
-	if err != nil {
-		fmt.Println("Error listing files:", err)
-		return
-	}
-	testFile := files.Files[0]
-	fmt.Println("testFile:")
-	fmt.Println(testFile)
-
-	/*
-		// Transfer ownership of the first file to the second user
-		fmt.Println("Access Token 1:", accessToken1.AccessToken)
-		err = TransferOwnership(testFile.Id, accessToken1.AccessToken, "franlegon.backup5@gmail.com")
-		if err != nil {
-			fmt.Println("Error transferring ownership:", err)
-			return
-		}
-		fmt.Println("Ownership transferred successfully")
-	*/
-
-	fileReader, err := testFile.StreamDownload(accessToken1.AccessToken)
-	if err != nil {
-		fmt.Println("Error streaming download:", err)
-		return
-	}
-	defer fileReader.Close()
-	fileReaderCopy, err := testFile.StreamDownload(accessToken1.AccessToken)
-	if err != nil {
-		fmt.Println("Error streaming download:", err)
-		return
-	}
-	defer fileReaderCopy.Close()
-
-	hash, err := CalculateSHA256Hash(fileReaderCopy)
-	if err != nil {
-		fmt.Println("Error calculating SHA256 hash:", err)
-		return
-	}
-	uploadedFile, err := UploadFileAsStream(accessToken5.AccessToken, fileReader, testFile.Name, hash)
-	if err != nil {
-		fmt.Println("Error uploading file:", err)
-		return
-	}
-	fmt.Println("Uploaded File:")
-	fmt.Println(uploadedFile)
-
-}
-
-func main5() {
-	//DecryptFile("Credentials_UsersRefreshTokens.json.enc")
-	//return
-
-	db, err := GetSQLiteConnection()
-	if err != nil {
-		fmt.Println("Error getting SQLite connection:", err)
-		return
-	}
-	defer db.Close()
-	//defer EncryptFile("sqlite.db")
-	//defer os.Remove("sqlite.db")
-	if err = CreateSQLiteTables(db); err != nil {
-		fmt.Println("Error creating SQLite tables:", err)
-		return
-	}
-
-	GoogleCredentials, err := GetClientCredentialsFromOAuthJson()
-	if err != nil {
-		fmt.Println("Error getting client credentials:", err)
-		return
-	}
-	accessToken, err := GoogleCredentials.GetAccessToken("franlegon.backup5@gmail.com")
-	if err != nil {
-		fmt.Println("Error getting access token:", err)
-		return
-	}
-	fmt.Println("Access Token:", accessToken.AccessToken)
-	files, err := ListFiles(accessToken.AccessToken)
-	if err != nil {
-		fmt.Println("Error listing files:", err)
-		return
-	}
-
-	err = InsertOrUpdateInSQLiteTable(files)
-	if err != nil {
-		fmt.Println("Error inserting files into SQLite:", err)
-		return
-	}
-
-	mediaItems, err := ListMediaItems(accessToken.AccessToken)
-	if err != nil {
-		fmt.Println("Error listing media items:", err)
-		return
-	}
-
-	err = InsertOrUpdateInSQLiteTable(mediaItems)
-	if err != nil {
-		fmt.Println("Error inserting media items into SQLite:", err)
-		return
-	}
-}
-
-func main4() {
-	//EncryptFile("Credentials_UsersRefreshTokens.json")
-	//return
-	GoogleCredentials, err := GetClientCredentialsFromOAuthJson()
-	if err != nil {
-		fmt.Println("Error getting client credentials:", err)
-		return
-	}
-	accessToken1, err := GoogleCredentials.GetAccessToken("franlegon.backup1@gmail.com")
-	if err != nil {
-		fmt.Println("Error getting access token:", err)
-		return
-	}
-	accessToken5, err := GoogleCredentials.GetAccessToken("franlegon.backup5@gmail.com")
-	if err != nil {
-		fmt.Println("Error getting access token:", err)
-		return
-	}
-	sharedAlbums, err := GetSharedAlbums(accessToken1.AccessToken)
-	if err != nil {
-		fmt.Println("Error getting shared albums:", err)
-		return
-	}
-	fmt.Println("Shared Albums:")
-	for _, album := range sharedAlbums {
-		fmt.Println(album)
-	}
-
-	sharedAlbum1 := sharedAlbums[0].Id
-	fmt.Printf("Shared Album id: %s\n", sharedAlbum1)
-	fmt.Printf("Shared Album name: %s\n", sharedAlbums[0].Title)
-
-	albumMediaItems, err := GetAlbumMediaItems(accessToken1.AccessToken, sharedAlbum1)
-	if err != nil {
-		fmt.Println("Error getting album media items:", err)
-		return
-	}
-	fmt.Println("albumMediaItems.MediaItems[0]:")
-	fmt.Println(albumMediaItems.MediaItems[0])
-
-	//mediaItemIds := albumMediaItems.GetMediaItemIds()
-
-	/*
-		album2, err := CreateAlbum(accessToken.AccessToken, "My Shared Album (TESTING)")
-		if err != nil {
-			fmt.Println("Error creating shared album:", err)
-			return
-		}
-		fmt.Printf("Created shared album id: %s\n", album2)
-
-		shareInfo, err := ShareAlbum(accessToken.AccessToken, album2)
-		if err != nil {
-			fmt.Println("Error sharing album:", err)
-			return
-		}
-		fmt.Println("ShareInfo:")
-		fmt.Println(shareInfo)
-	*/
-
-	/*
-		err = AddMediaItemsToAlbum(accessToken.AccessToken, album2, mediaItemIds)
-		if err != nil {
-			fmt.Println("Error adding media items to album:", err)
-			return
-		}
-			fmt.Println("Media items added to album successfully")
-	*/
-
-	ioReader, err := albumMediaItems.MediaItems[0].StreamDownload(accessToken1.AccessToken)
-	if err != nil {
-		fmt.Println("Error streaming download:", err)
-		return
-	}
-	defer ioReader.Close()
-
-	uploadedMediaItem, err := UploadMediaItemAsStream(accessToken5.AccessToken, ioReader, albumMediaItems.MediaItems[0].Filename+" testing")
-	if err != nil {
-		fmt.Println("Error uploading media item:", err)
-		return
-	}
-	fmt.Println("Uploaded Media Item:")
-	fmt.Println(uploadedMediaItem)
-}
-
-func main2() {
-
-	ClientCredentials, err := GetClientCredentialsFromOAuthJson()
-	if err != nil {
-		fmt.Println("Error getting client credentials:", err)
-		return
-	}
-
-	////
-	fmt.Println("Client ID:", ClientCredentials.ClientID)
-
-	accessToken, err := ClientCredentials.GetAccessToken("franlegon.backup5@gmail.com")
-	if err != nil {
-		fmt.Println("Error getting access token:", err)
-		return
-	}
-
-	//files, err := ListFiles(accessToken.AccessToken)
-	//if err != nil {
-	//	fmt.Println("Error listing files:", err)
-	//	return
-	//}
-	//fmt.Println("Files:")
-	//for _, f := range files.Files {
-	//	fmt.Println(f)
-	//}
-	fmt.Println("--------------------------------------------------------------------")
-	quota, err := GetStorageQuota(accessToken.AccessToken)
-	if err != nil {
-		fmt.Println("Error getting quota:", err)
-		return
-	}
-	fmt.Println("Quota:/n", quota)
-	fmt.Println("--------------------------------------------------------------------")
-	fmt.Println("Quota in GigaBytes:/n", quota.SeeInGigaBytes())
-	fmt.Println("--------------------------------------------------------------------")
-}
-
-func main3() {
-	WhatsappCredentials, err := GetWhatsappCredentials()
-	if err != nil {
-		fmt.Println("Error getting whatsapp credentials:", err)
-		return
-	}
-	err = SendWhatsappMessage(WhatsappCredentials.AccessToken, "Hello from Go!", WhatsappCredentials.To)
-	if err != nil {
-		fmt.Println("Error sending message:", err)
-		return
-	}
 }
 
 // #endregion main (testing)
+
+// #region main process
+func ShareAllFoldersFromMainAccountToAllBackupAccounts() error {
+	GoogleCredentials, err := GetClientCredentialsFromOAuthJson()
+	if err != nil {
+		fmt.Println("Error getting client credentials:", err)
+		return err
+	}
+	accessTokenMain, err := GoogleCredentials.GetAccessToken(mainAccount)
+	if err != nil {
+		fmt.Println("Error getting access token:", err)
+		return err
+	}
+	// Query ids of folders to share from sqlite
+	db, err := GetSQLiteConnection()
+	if err != nil {
+		fmt.Println("Error getting SQLite connection:", err)
+		return err
+	}
+	defer db.Close()
+	query := fmt.Sprintf("SELECT id FROM [main].[GoogleDriveFiles] WHERE [mimeType] = 'application/vnd.google-apps.folder' AND [ownerEmailAddress] = '%s'", mainAccount)
+	rows, err := db.Query(query)
+	if err != nil {
+		fmt.Println("Error querying folders:", err)
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var folderID string
+		if err := rows.Scan(&folderID); err != nil {
+			fmt.Println("Error scanning folder id:", err)
+			return err
+		}
+		for _, backupAccount := range backupAccounts {
+			err = ShareFileOrFolder(folderID, accessTokenMain.AccessToken, backupAccount, "writer")
+			if err != nil {
+				fmt.Println("Error sharing folder:", err)
+				return err
+			}
+		}
+	}
+	fmt.Println("All folders from main shared successfully with all backup accounts.")
+	return nil
+}
+
+func TransferAllFilesFromMainAccountToABackupAccount() error {
+	GoogleCredentials, err := GetClientCredentialsFromOAuthJson()
+	if err != nil {
+		fmt.Println("Error getting client credentials:", err)
+		return err
+	}
+	accessTokenMain, err := GoogleCredentials.GetAccessToken(mainAccount)
+	if err != nil {
+		fmt.Println("Error getting access token:", err)
+		return err
+	}
+
+	// Query ids of files to transfer from sqlite
+	db, err := GetSQLiteConnection()
+	if err != nil {
+		fmt.Println("Error getting SQLite connection:", err)
+		return err
+	}
+	defer db.Close()
+	query := fmt.Sprintf("SELECT id, name, mimeType, description, ownerEmailAddress, parents FROM [main].[GoogleDriveFiles] WHERE [mimeType] != 'application/vnd.google-apps.folder' AND [ownerEmailAddress] = '%s'", mainAccount)
+	rows, err := db.Query(query)
+	if err != nil {
+		fmt.Println("Error querying files:", err)
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var file File
+		var parents string
+		file.Owners = make([]struct {
+			DisplayName  string `json:"displayName"`
+			EmailAddress string `json:"emailAddress"`
+		}, 1)
+		if err := rows.Scan(&file.Id, &file.Name, &file.MimeType, &file.Description, &file.Owners[0].EmailAddress, &parents); err != nil {
+			fmt.Println("Error scanning file metadata:", err)
+			return err
+		}
+		file.Parents = strings.Split(parents, ",")
+		// query permisions of file
+		permissions, err := QuerySharedWithAndRole(file.Id, accessTokenMain.AccessToken)
+		if err != nil {
+			fmt.Println("Error querying permissions:", err)
+			return err
+		}
+
+		//VMT
+		fmt.Println("File to transfer:", file.Name)
+		fmt.Println("All file info:", file)
+		//VMT
+		// check if file is owned by main account, if it isnt, continue with next file
+		if len(file.Owners) == 0 {
+			fmt.Printf("File %s has no owners. Skipping file.\n", file.Name)
+			return errors.New("file has no owners")
+		} else if file.Owners[0].EmailAddress != mainAccount {
+			fmt.Printf("File %s is owned by %s, not main account (%s). Skipping file.\n", file.Owners[0].EmailAddress, file.Name, mainAccount)
+			continue
+		} else {
+			fmt.Printf("File %s is owned by main account (%s).\n", file.Name, mainAccount)
+		}
+
+		err = TransferFile(accessTokenMain.AccessToken, file, backupAccounts[0], permissions)
+		if err != nil {
+			fmt.Println("Error transferring file:", err)
+			return err
+		}
+	}
+	fmt.Println("All files from main transferred successfully to backup account.")
+	return nil
+}
+
+// #endregion main process
 
 // #region Encryption
 type EncryptionKey struct {
@@ -566,20 +461,22 @@ type Files struct {
 	NextPageToken string `json:"nextPageToken,omitempty"`
 }
 type File struct {
-	Name     string `json:"name"`
-	Id       string `json:"id"`
-	Kind     string `json:"kind"`
-	MimeType string `json:"mimeType"`
-	Size     string `json:"size"`
-	Owners   []struct {
+	Name        string `json:"name"`
+	Id          string `json:"id"`
+	Kind        string `json:"kind"`
+	MimeType    string `json:"mimeType"`
+	Size        string `json:"size"`
+	Description string `json:"description"`
+	Owners      []struct {
 		DisplayName  string `json:"displayName"`
 		EmailAddress string `json:"emailAddress"`
 	} `json:"owners"`
+	Parents []string `json:"parents"`
 }
 
 func ListFiles(accessToken string) (Files, error) {
 	var allFiles Files
-	url := "https://www.googleapis.com/drive/v3/files" + "?fields=nextPageToken,files(id,name,kind,mimeType,owners,size)"
+	url := "https://www.googleapis.com/drive/v3/files" + "?fields=nextPageToken,files(id,name,kind,mimeType,owners,size,description,parents)"
 	for {
 		req, err := http.NewRequest("GET", url, nil)
 		if err != nil {
@@ -771,8 +668,7 @@ func SimpleUploadFileAsStream(accessToken string, ioReader io.Reader, filename s
 	return file, nil
 }
 
-// Multipart Upload
-func UploadFileAsStream(accessToken string, ioReader io.Reader, filename string, hash string) (File, error) {
+func UploadFileAsStream(accessToken string, ioReader io.Reader, filename string, description string) (File, error) {
 	url := "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart"
 
 	var requestBody bytes.Buffer
@@ -785,16 +681,9 @@ func UploadFileAsStream(accessToken string, ioReader io.Reader, filename string,
 	if err != nil {
 		return File{}, err
 	}
-	//hash, err := CalculateSHA256Hash(ioReader)
-	//if err != nil {
-	//	return File{}, err
-	//}
 	metadata := map[string]interface{}{
 		"name":        filename,
-		"description": hash,
-		"appProperties": map[string]string{
-			"SHA256": hash,
-		},
+		"description": description,
 	}
 	if err := json.NewEncoder(metadataPart).Encode(metadata); err != nil {
 		return File{}, err
@@ -833,6 +722,181 @@ func UploadFileAsStream(accessToken string, ioReader io.Reader, filename string,
 	}
 
 	return file, nil
+}
+
+func (file File) UploadFileAsStream(accessToken string) (File, error) {
+	fileReader, err := file.StreamDownload(accessToken)
+	if err != nil {
+		return File{}, err
+	}
+	defer fileReader.Close()
+
+	return UploadFileAsStream(accessToken, fileReader, file.Name, file.Description)
+}
+
+func DeleteFile(fileID string, accessToken string) error {
+	url := "https://www.googleapis.com/drive/v3/files/" + fileID
+	req, err := http.NewRequest("DELETE", url, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("delete file failed: %s", resp.Status)
+	}
+
+	return nil
+}
+
+func TransferFile(actualOwnerAccessToken string, file File, newOwnerEmail string, permissions []Permission) error {
+	ClientCredentials, err := GetClientCredentialsFromOAuthJson()
+	if err != nil {
+		return err
+	}
+	newOwnerAccess, err := ClientCredentials.GetAccessToken(newOwnerEmail)
+	if err != nil {
+		return err
+	}
+	newOwnerAccessToken := newOwnerAccess.AccessToken
+	fileReader, err := file.StreamDownload(actualOwnerAccessToken)
+	if err != nil {
+		fmt.Println("Error streaming download:", err)
+		return err
+	}
+	defer fileReader.Close()
+	newFile, err := UploadFileAsStream(newOwnerAccessToken, fileReader, file.Name, file.Description)
+	if err != nil {
+		fmt.Println("Error uploading file:", err)
+		return err
+	}
+	if err = DeleteFile(file.Id, actualOwnerAccessToken); err != nil {
+		fmt.Printf("Error deleting file with id %s: %v", file.Id, err)
+		return err
+	}
+
+	for _, parentID := range file.Parents {
+		err = ShareFileOrFolder(parentID, actualOwnerAccessToken, newOwnerEmail, "writer")
+		if err != nil {
+			fmt.Println("Error sharing folder:", err)
+			return err
+		}
+	}
+	if err = MoveFileToFolder(newOwnerAccessToken, newFile.Id, file.Parents); err != nil {
+		fmt.Println("Error moving file to folder:", err)
+		return err
+	}
+
+	for _, permission := range permissions {
+		if permission.Role == "owner" {
+			permission.Role = "writer"
+		}
+		if permission.EmailAddress == newOwnerEmail {
+			continue
+		}
+		err = ShareFileOrFolder(newFile.Id, newOwnerAccessToken, permission.EmailAddress, permission.Role)
+		if err != nil {
+			fmt.Printf("Error sharing file with id %s: %v", newFile.Id, err)
+			return err
+		}
+	}
+
+	return nil
+}
+
+func ShareFileOrFolder(fileID string, accessToken string, email string, role string) error {
+	url := "https://www.googleapis.com/drive/v3/files/" + fileID + "/permissions"
+	req, err := http.NewRequest("POST", url, strings.NewReader(`{
+		"role": "`+role+`",
+		"type": "user",
+		"emailAddress": "`+email+`"
+	}`))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		return fmt.Errorf("share file failed: %s", resp.Status)
+	}
+
+	return nil
+}
+
+func MoveFileToFolder(accessToken string, fileID string, folderIDs []string) error {
+	url := "https://www.googleapis.com/drive/v3/files/" + fileID + "?addParents=" + strings.Join(folderIDs, ",") + "&removeParents=root"
+	req, err := http.NewRequest("PATCH", url, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("MoveFileToFolder(%s, %s, %v)\nfailed: %s", accessToken, fileID, folderIDs, resp.Status)
+	}
+
+	return nil
+}
+
+type Permission struct {
+	FileId           string
+	ID               string `json:"id"`
+	Type             string `json:"type"`
+	Role             string `json:"role"`
+	EmailAddress     string `json:"emailAddress,omitempty"`
+	PermisionDetails struct {
+		PermissionType string `json:"permissionType"`
+		Role           string `json:"role"`
+		Inherited      bool   `json:"inherited"`
+	} `json:"permissionDetails"`
+	Inherited bool
+}
+
+func QuerySharedWithAndRole(fileID string, accessToken string) ([]Permission, error) {
+	url := "https://www.googleapis.com/drive/v3/files/" + fileID + "/permissions?fields=permissions(id,type,role,emailAddress,permissionDetails)"
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var permissions struct {
+		Permissions []Permission `json:"permissions"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&permissions); err != nil {
+		return nil, err
+	}
+
+	for i := range permissions.Permissions {
+		permissions.Permissions[i].FileId = fileID
+	}
+
+	return permissions.Permissions, nil
 }
 
 // #endregion Drive
@@ -1627,7 +1691,7 @@ func GetSQLiteConnection() (*sql.DB, error) {
 }
 
 func CreateSQLiteTables(db *sql.DB) error {
-	tables := []string{"GoogleDriveFiles", "GooglePhotosMediaItems"}
+	tables := []string{"GoogleDriveFiles", "GooglePhotosMediaItems", "GoogleDriveSharedWith"}
 
 	for _, table := range tables {
 		var tableCreationQuery string
@@ -1638,8 +1702,10 @@ func CreateSQLiteTables(db *sql.DB) error {
 				name TEXT,
 				mimeType TEXT,
 				size INTEGER,
+				description TEXT,
 				ownerDisplayName TEXT,
-				ownerEmailAddress TEXT
+				ownerEmailAddress TEXT,
+				parents TEXT
 			)`
 		case "GooglePhotosMediaItems":
 			tableCreationQuery = `CREATE TABLE IF NOT EXISTS GooglePhotosMediaItems (
@@ -1654,6 +1720,15 @@ func CreateSQLiteTables(db *sql.DB) error {
 				width TEXT,
 				height TEXT
 			)`
+		case "GoogleDriveSharedWith":
+			tableCreationQuery = `CREATE TABLE IF NOT EXISTS GoogleDriveSharedWith (
+                id TEXT PRIMARY KEY,
+				fileId TEXT,
+                sharedWithEmailAddress TEXT,
+				role TEXT,
+				inherited BOOLEAN,
+                FOREIGN KEY (fileId) REFERENCES GoogleDriveFiles(id)
+            )`
 		default:
 			return errors.New("invalid SQL table name")
 		}
@@ -1667,6 +1742,14 @@ func CreateSQLiteTables(db *sql.DB) error {
 	return nil
 }
 
+func (Files Files) GetValuesSlicesForSqlInsert() [][]interface{} {
+	var values [][]interface{}
+	for _, f := range Files.Files {
+		values = append(values, []interface{}{f.Id, f.Name, f.MimeType, f.Size, f.Description, f.Owners[0].DisplayName, f.Owners[0].EmailAddress, strings.Join(f.Parents, ",")})
+	}
+	return values
+}
+
 func (MediaItems MediaItems) GetValuesSlicesForSqlInsert() [][]interface{} {
 	var values [][]interface{}
 	for _, m := range MediaItems.MediaItems {
@@ -1675,10 +1758,14 @@ func (MediaItems MediaItems) GetValuesSlicesForSqlInsert() [][]interface{} {
 	return values
 }
 
-func (Files Files) GetValuesSlicesForSqlInsert() [][]interface{} {
+type Permissions struct {
+	Permissions []Permission
+}
+
+func (Permissions Permissions) GetValuesSlicesForSqlInsert() [][]interface{} {
 	var values [][]interface{}
-	for _, f := range Files.Files {
-		values = append(values, []interface{}{f.Id, f.Name, f.MimeType, f.Size, f.Owners[0].DisplayName, f.Owners[0].EmailAddress})
+	for _, p := range Permissions.Permissions {
+		values = append(values, []interface{}{p.FileId + " - " + p.EmailAddress, p.FileId, p.EmailAddress, p.Role, p.Inherited})
 	}
 	return values
 }
@@ -1696,7 +1783,10 @@ func InsertOrUpdateInSQLiteTable(data SqlValuesGenerator) error {
 		columns = []string{"id", "description", "productUrl", "baseUrl", "mimeType", "filename", "fileSize", "creationTime", "width", "height"}
 	case Files:
 		tableName = "GoogleDriveFiles"
-		columns = []string{"id", "name", "mimeType", "size", "ownerDisplayName", "ownerEmailAddress"}
+		columns = []string{"id", "name", "mimeType", "size", "description", "ownerDisplayName", "ownerEmailAddress", "parents"}
+	case Permissions:
+		tableName = "GoogleDriveSharedWith"
+		columns = []string{"id", "fileId", "sharedWithEmailAddress", "role", "inherited"}
 	default:
 		panic("invalid data type in InsertOrUpdateInSQLiteTable")
 	}
@@ -1728,6 +1818,40 @@ func InsertOrUpdateInSQLiteTable(data SqlValuesGenerator) error {
 		_, err := db.Exec(sqlStatement, append(row, row[1:]...)...)
 		if err != nil {
 			fmt.Println("Error inserting row: ", row)
+			return err
+		}
+	}
+
+	return nil
+}
+
+func FillSQLiteTableFromGoogleDrive(accessToken string) error {
+	//if db does not exist, create it and create tables in it
+	db, err := GetSQLiteConnection()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	if err = CreateSQLiteTables(db); err != nil {
+		return err
+	}
+
+	files, err := ListFiles(accessToken)
+	if err != nil {
+		return err
+	}
+	if err = InsertOrUpdateInSQLiteTable(files); err != nil {
+		return err
+	}
+
+	for _, file := range files.Files {
+		permissions, err := QuerySharedWithAndRole(file.Id, accessToken)
+		if err != nil {
+			return err
+		}
+		perms := Permissions{Permissions: permissions}
+		if err = InsertOrUpdateInSQLiteTable(perms); err != nil {
 			return err
 		}
 	}
