@@ -160,10 +160,6 @@ func TransferAllFilesFromMainAccountToABackupAccount() error {
 			return err
 		}
 
-		//VMT
-		fmt.Println("File to transfer:", file.Name)
-		fmt.Println("All file info:", file)
-		//VMT
 		// check if file is owned by main account, if it isnt, continue with next file
 		if len(file.Owners) == 0 {
 			fmt.Printf("File %s has no owners. Skipping file.\n", file.Name)
@@ -171,8 +167,6 @@ func TransferAllFilesFromMainAccountToABackupAccount() error {
 		} else if file.Owners[0].EmailAddress != mainAccount {
 			fmt.Printf("File %s is owned by %s, not main account (%s). Skipping file.\n", file.Owners[0].EmailAddress, file.Name, mainAccount)
 			continue
-		} else {
-			fmt.Printf("File %s is owned by main account (%s).\n", file.Name, mainAccount)
 		}
 
 		err = TransferFile(accessTokenMain.AccessToken, file, backupAccounts[0], permissions)
@@ -619,7 +613,7 @@ func (f File) StreamDownload(accessToken string) (io.ReadCloser, error) {
 	}
 
 	// The caller is responsible for closing the response body
-	fmt.Println("Remenber to close the response body")
+	//fmt.Println("Remenber to close the response body")
 	return resp.Body, nil
 }
 
@@ -1027,7 +1021,7 @@ func (m MediaItem) StreamDownload(accessToken string) (io.ReadCloser, error) {
 	}
 
 	// The caller is responsible for closing the response body
-	fmt.Println("Remenber to close the response body")
+	//fmt.Println("Remenber to close the response body")
 	return resp.Body, nil
 }
 
